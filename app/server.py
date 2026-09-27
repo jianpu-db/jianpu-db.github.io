@@ -55,10 +55,22 @@ MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=ut
 
 
 def image_roots():
+    """`/img/<工作区相对路径>` 允许落在哪些根目录下(按顺序找, 只留**存在**的)。
+
+    ⚠ 2026-09-28 修: 原来只有 `<工作区>/images` 与 `<工作区>/images-prep`。本机这两条都不存在
+    —— 图库在 `<工作区>/jianpu2/images-prep`(3.8 万文件)。后果: 安全校验 `full 必须落在
+    IMG_ROOTS 之一里面` 会把**每一个** `/img/...` 请求都判成越界 -> 线上每首的「每谱一页 / 原图」
+    全部 404。把 `jianpu2/` 也作为一个候选根(这样 `images-prep/<批次>/...` 能正确拼成
+    `<工作区>/jianpu2/images-prep/<批次>/...`), 并且不再把不存在的目录放进白名单。
+    """
     env = os.environ.get("JIANPU_IMAGES", "").strip()
     if env:
         return [os.path.abspath(p) for p in env.split(os.pathsep) if p.strip()]
-    return [os.path.join(WS, "images"), os.path.join(WS, "images-prep")]
+    cands = [os.path.join(WS, "images"), os.path.join(WS, "images-prep"),
+             os.path.join(WS, "jianpu2"),          # <- 图库在 jianpu2 下面的情形(本机)
+             os.path.join(WS, "jianpu2", "images-prep")]
+    existed = [c for c in cands if os.path.isdir(c)]
+    return existed or cands[:2]
 
 
 IMG_ROOTS = image_roots()
@@ -386,11 +398,15 @@ def resolve_img(rel):
         return None
     if os.path.splitext(rel)[1].lower() not in IMG_EXT:
         return None
-    full = os.path.normpath(os.path.join(WS, rel))
+    # ⚠ 2026-09-28 修: 原来只拿 `WS` 当基准拼一次(`join(WS, rel)`), 再检查它是否落在某个
+    #   白名单根里。当图库在 `<工作区>/jianpu2/images-prep`(本机)时, 拼出来的是
+    #   `<工作区>/images-prep/...` —— 既不是真文件、也不在任何根里, 于是**每个 /img/ 都 404**。
+    #   改成**逐个根试拼**, 并且每个根各自做一次包含性检查(越界仍然一律拒绝)。
     for root in IMG_ROOTS:
+        r = os.path.abspath(root)
         try:
-            if os.path.commonpath([full, os.path.abspath(root)]) == os.path.abspath(root) \
-                    and os.path.isfile(full):
+            full = os.path.normpath(os.path.join(r, rel))
+            if os.path.commonpath([full, r]) == r and os.path.isfile(full):
                 return full
         except ValueError:                     # 不同盘符/无法比较
             continue

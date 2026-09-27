@@ -250,6 +250,23 @@ def main():
             img_index, img_st = bii.build(out=a.out, quiet=True)
         except Exception as e:
             print(f"  ! 原图索引没建成({type(e).__name__}: {e}) —— 谱页会显示'还没存下原图'")
+        # ⚠ 2026-09-28 护栏: **绝不允许静默把原图索引清零**。
+        #   背景: 图库不在工具假设的位置时, 扫描会"成功返回空字典", 于是 images.jsonl.gz
+        #   被改写成 0 条, 线上每首的「每谱一页 / 原图」一起消失 —— 实测从 23,328 条掉到 0,
+        #   而输出里只有一行不起眼的"原图 0 首 / 0 页"。这里改成: 若**新扫出 0 条**
+        #   而旧文件非空, 就保留旧文件并**大声报错退出**, 让人去修图库路径(而不是发布空索引)。
+        old_img = os.path.join(a.out, "images.jsonl.gz")
+        old_n = 0
+        if os.path.isfile(old_img):
+            try:
+                with gzip.open(old_img, "rt", encoding="utf-8") as gh:
+                    old_n = sum(1 for ln in gh if ln.strip())
+            except Exception:
+                old_n = 0
+        if not img_index and old_n > 0:
+            print(f"  !! 原图索引扫出 0 条, 而现有 {old_img} 里有 {old_n} 条 —— **保留旧文件**。")
+            print("     多半是图库不在工具假设的位置: 设 JIANPU_IMAGES 指过去, 或看 build_image_index.default_roots()")
+            raise SystemExit(3)
     with_images = sum(1 for r in rows if r["s"] and r["s"] in img_index)
     image_pages = sum(len(img_index[r["s"]]["pg"]) for r in rows if r["s"] in img_index)
     stats = {"platforms": platforms,

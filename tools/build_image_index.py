@@ -65,11 +65,21 @@ except Exception:                              # 没装 Pillow -> 只列文件�
 
 
 def default_roots():
-    """图片根目录: 环境变量优先(冒号分隔), 否则工作区下的 images/ 与 images-prep/。"""
+    """图片根目录: 环境变量优先(冒号分隔), 否则**挨个试**几个可能的位置, 取存在的那些。
+
+    ⚠ 2026-09-28 修: 原来只试 `<工作区>/images` 与 `<工作区>/images-prep`。本机实测这两条
+    **都不存在** —— 图库在 `<工作区>/jianpu2/images-prep`(3.8 万文件)。后果不是报错, 而是
+    `scan()` 把两条根都记进 `missing_roots` 后返回**空索引**, 于是 `data/images.jsonl.gz`
+    被静默改写成 0 条 —— 线上每一首的"每谱一页 / 原图"都会消失(实测从 23,328 条掉到 0)。
+    所以这里改成按顺序探测、取**存在**的, 并且不再把"全都找不到"当成正常结果(见 build() 的护栏)。
+    """
     env = os.environ.get("JIANPU_IMAGES", "").strip()
     if env:
         return [os.path.abspath(p) for p in env.split(os.pathsep) if p.strip()]
-    return [os.path.join(WS, "images"), os.path.join(WS, "images-prep")]
+    cands = [os.path.join(WS, "images-prep"), os.path.join(WS, "images"),
+             # 图库其实在 jianpu2 下面的情形(本机就是这样)
+             os.path.join(WS, "jianpu2", "images-prep"), os.path.join(WS, "jianpu2", "images")]
+    return [c for c in cands if os.path.isdir(c)] or cands[:2]
 
 
 def natural(name):
@@ -120,12 +130,19 @@ def scan(roots, rel_base, quiet=False):
             if not SRCID.match(src):
                 stats["skipped_nokey"] += 1
                 continue
-            rel = os.path.relpath(dp, rel_base).replace(os.sep, "/")
+            # 记录用的相对路径一律**从"图库本身所在的上一层"起算**, 于是不管图库实际在
+            # `<工作区>/images-prep` 还是 `<工作区>/jianpu2/images-prep`, 写出来的都是
+            # `images-prep/<批次>/…` —— 线上 `/img/` 的 URL 形状因此保持不变。
+            # (2026-09-28: 只把 root 加进可选列表而不改这里, 会把路径写成 `jianpu2/images-prep/…`,
+            #  等于悄悄换了线上 URL 方案, 已发布的 R2/反代布局会对不上。)
+            _base = (os.path.dirname(root) if os.path.basename(root) in ("images", "images-prep")
+                     else rel_base)
+            rel = os.path.relpath(dp, _base).replace(os.sep, "/")
             if rel.startswith("../"):          # 图片根在工作区外 -> 前端/服务端都取不到, 别写进去
                 stats["skipped_nokey"] += 1
                 continue
             cands.setdefault(src, []).append({
-                "rel": rel, "files": files, "pages": pages,
+                "rel": rel, "files": files, "pages": pages, "abs": dp,
                 "prep": os.path.basename(root).startswith("images-prep"),
             })
             stats["dirs"] += 1
@@ -162,13 +179,15 @@ def build(roots=None, rel_base=None, out=None, quiet=False):
         cs = sorted(cands[src], key=rank)
         picked, thin = None, []
         for c in cs:
-            pages = probe(os.path.join(rel_base, c["rel"]), c["pages"], thin) if c["pages"] else []
+            # 用**候选自己的绝对目录**去验图, 不要用 rel_base+rel 拼 —— 记录用的 rel 是
+            # "从图库上一层起算"的规范写法(见 scan), 与 rel_base 不一定是同一层。
+            pages = probe(c["abs"], c["pages"], thin) if c["pages"] else []
             if pages:
                 picked = (c, pages, 0)
                 break
         if picked is None:                     # 一张整页图都没有(或全坏/全是细条) -> 用派生件兜底
             c = cs[0]
-            got = probe(os.path.join(rel_base, c["rel"]), c["files"])
+            got = probe(c["abs"], c["files"])
             if not got:
                 n_bad += 1
                 continue

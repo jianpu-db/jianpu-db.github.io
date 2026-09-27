@@ -21,6 +21,16 @@ run node tools/check_search.mjs "$URL"
 run node tools/check_ui.mjs "$URL"
 run node tools/check_tune.mjs "$URL"
 run node tools/check_live.mjs "$URL"
+# 前端 jptok.js 与 Python 侧 jptok.py 的**token 口径**等价性(第三份口径的锁, 见 check_jptok_parity.sh)。
+# 需要 jianpu2/jianpu-db 就在旁边; 扫全语料约 30s, JIANPU_QUICK=1 时跳过。
+ROOT="$(dirname "$WEB")"
+if [ "${JIANPU_QUICK:-0}" = "1" ]; then
+  echo; echo "=== jptok JS/Python 等价性 === (跳过: JIANPU_QUICK=1)"
+elif [ -f "$ROOT/jianpu2/tools/dump_jptok_tokens.py" ]; then
+  run bash tools/check_jptok_parity.sh
+else
+  echo; echo "=== jptok JS/Python 等价性 === (跳过: 旁边没有 jianpu2)"
+fi
 # GitHub Pages(纯静态托管)那条路: 子路径 + 404.html 回退 + 只读, 与 Cloudflare 那套**不一样**,
 # 所以单列一组(构建 + 产物断言 + 真浏览器模拟 Pages 规矩)。
 run bash tools/check_gh_pages.sh

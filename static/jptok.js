@@ -31,7 +31,10 @@ export function beat(t) {
     const m = s.match(/([cqsdh]+)\.*[\[\]]?$/);
     letters = m ? m[1] : '';
   }
-  const BEAT = { h: 2.0, c: 1.0, '': 1.0, q: 0.5, s: 0.25, d: 0.125 };
+  // h = **六十四分音符**(0.0625 拍), 不是二分音符 —— 2026-09-24 在 Python 侧定案的,
+  // 这里 2026-09-28 才跟上: 原来写 2.0, 与 jptok.py 漂了整整一轮(口径只能有一份)。
+  // 定案证据见 jptok.py 的 BEAT 注释(项目自己的 jianpu-ly 里 types={"64th":"h", …})。
+  const BEAT = { h: 0.0625, c: 1.0, '': 1.0, q: 0.5, s: 0.25, d: 0.125 };
   const v = Object.prototype.hasOwnProperty.call(BEAT, letters) ? BEAT[letters] : 0.0625;
   return s.endsWith('.') ? v * 1.5 : v;
 }

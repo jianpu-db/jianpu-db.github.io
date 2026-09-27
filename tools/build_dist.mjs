@@ -49,7 +49,9 @@ if (TARGET !== 'cf' && TARGET !== 'gh') {
 const DIST = resolve(ROOT, argOf('out', TARGET === 'gh' ? 'dist-gh' : 'dist'));
 const API = argOf('api', '');            // 只有 gh 目标用得上; 不给 = 只读镜像
 
-const STATIC_FILES = ['app.js', 'search.js', 'jptok.js', 'style.css'];
+// ⚠ **顺序 = 依赖顺序**(见 hashedStatic 的说明): jptok/search/style 不 import 别人, app 引用它们。
+//   名字由"改写后的最终内容"算, 所以引用者必须在被引用者**之后**才算。
+const STATIC_FILES = ['jptok.js', 'search.js', 'style.css', 'app.js'];
 // 静态资源带**内容哈希**文件名(app.<hash>.js): 否则 `_headers` 里的长缓存会让部署后
 // 部分边缘节点继续发旧 JS —— 实测踩到(截图上谱页还在渲染碎图 / 浏览器里 img 数为 0, 两种结果并存)。
 // 带哈希后长缓存就安全了: 内容一变 URL 就变。JS 里 `./search.js` 这类 import 也要一起改。
@@ -74,23 +76,37 @@ function put(src, rel) {
   console.log(`  ${rel.padEnd(28)} ${(sz / 1e6).toFixed(2)} MB`);
 }
 
-/** 内容哈希(8 位) + 把 static/ 下四个文件改成 app.<hash>.js 这种名字, 并改掉相互 import。 */
+/** 内容哈希(8 位) + 把 static/ 下四个文件改成 app.<hash>.js 这种名字, 并改掉相互 import。
+ *
+ * ⚠ 两条都是 2026-09-28 修出来的, 都跟"名字 = 内容的哈希"这件事有关:
+ *
+ * ① **名字必须由改写后的最终内容算**(依赖优先的单趟), 不能拿源文件算。
+ *    原来拿 `static/app.js` 的源内容算哈希, 却把"import 指向 jptok 新名字"的内容写进
+ *    `app.<hash>.js` —— 于是"只改了 jptok、没动 app"这种提交会让 app 的**名字不变而内容变**。
+ *    Cloudflare 那条路给 `/static/*` 设的是 `max-age=31536000, immutable`, 于是边缘节点/浏览器
+ *    会继续发**旧的 app.<同名>.js**, 而它 import 的旧 jptok 已经在本次部署里删掉了
+ *    -> 那块客户端 import 404 直接白屏, 而且刷新也没用(名字没变, 缓存照样命中)。
+ *
+ * ② **哈希前必须把换行归一成 LF**。本机 `core.autocrlf=true`(工作区 CRLF), CI 是 LF ——
+ *    不归一的话同一个源文件在两处算出**两个名字**, 于是一次 push 里: 我这边算出 `12ec86b0`、
+ *    流水线算出 `49138bb1`, 互相改名, 仓库根的产物永远在抖(实测就是这么对上的:
+ *    sha256(LF blob)=49138bb1 = 流水线给出的名字, 而工作区 CRLF 文件是 12ec86b0)。
+ *    顺带把写出去的产物也钉成 LF, 于是"同一份源码 = 同一串字节 = 同一个名字"。
+ */
+const HASH_ORDER = STATIC_FILES;       // 依赖在前, 引用者在后
+
 function hashedStatic() {
   const map = {};                       // 原名 -> 新名
-  for (const f of STATIC_FILES) {
+  for (const f of HASH_ORDER) {
     const src = join(ROOT, 'static', f);
     if (!existsSync(src)) continue;
-    const h = createHash('sha256').update(readFileSync(src)).digest('hex').slice(0, 8);
-    const ext = f.slice(f.lastIndexOf('.'));
-    map[f] = f.slice(0, -ext.length) + '.' + h + ext;
-  }
-  for (const f of STATIC_FILES) {
-    const src = join(ROOT, 'static', f);
-    if (!existsSync(src) || !map[f]) continue;
-    let body = readFileSync(src, 'utf8');
-    for (const [oldName, newName] of Object.entries(map)) {   // 改 import/相对引用
+    let body = readFileSync(src, 'utf8').replace(/\r\n/g, '\n');   // 见 ②
+    for (const [oldName, newName] of Object.entries(map)) {        // 只可能引用**已算完**的那些
       body = body.split('./' + oldName).join('./' + newName);
     }
+    const h = createHash('sha256').update(body).digest('hex').slice(0, 8);   // 见 ①
+    const ext = f.slice(f.lastIndexOf('.'));
+    map[f] = f.slice(0, -ext.length) + '.' + h + ext;
     const rel = 'static/' + map[f];
     const dst = join(DIST, rel);
     mkdirSync(dirname(dst), { recursive: true });

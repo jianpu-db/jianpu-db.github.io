@@ -2,11 +2,15 @@
 //   走 HTTP 取 /data/songs.jsonl.gz 与 /static/*.js, 用**前端自己的检索代码**查一句。
 // 用法: node tools/check_live.mjs http://127.0.0.1:8770
 import { gunzipSync } from 'node:zlib';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 const BASE = (process.argv[2] || 'http://127.0.0.1:8770').replace(/\/$/, '');
-const ROOT = new URL('..', import.meta.url).pathname;
+// ⚠ 2026-09-28 修: 原来用 `new URL('..', import.meta.url).pathname`。在 Windows 上 pathname
+//   是 `/D:/Documents_D/...`(带前导斜杠), 再经 pathToFileURL 就成了
+//   `file:///D:/D:/Documents_D/...` —— 本自检直接 ERR_MODULE_NOT_FOUND 跑不起来
+//   (Linux 上正常, 所以一直没暴露)。标准写法是 fileURLToPath。
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const { buildIndex, search } = await import(pathToFileURL(resolve(ROOT, 'static/search.js')).href);
 const { parseQuery } = await import(pathToFileURL(resolve(ROOT, 'static/jptok.js')).href);
 

@@ -402,10 +402,18 @@ def resolve_img(rel):
     #   白名单根里。当图库在 `<工作区>/jianpu2/images-prep`(本机)时, 拼出来的是
     #   `<工作区>/images-prep/...` —— 既不是真文件、也不在任何根里, 于是**每个 /img/ 都 404**。
     #   改成**逐个根试拼**, 并且每个根各自做一次包含性检查(越界仍然一律拒绝)。
+    #
+    # ⚠ 同一次还补了个真漏洞: 包含性检查原来比的是**逻辑路径**, 而 `isfile()` 会**跟随符号链接**
+    #   —— 实测(本机): 在 images-prep 下放一个指向根外 .png 的 `_probe_link.jpg`,
+    #   请求 `/img/images-prep/.../_probe_link.jpg` 得到 **HTTP 200 + 根外文件内容**。
+    #   典型的 ../ 穿越(含 %2e%2e / 反斜杠 / 盘符 / UNC / NUL / ADS 共 12 种)本来就都被挡住,
+    #   漏的是这一路。修法: 用 **realpath 解析后再比** —— 链接指到根外就拒绝。
+    #   (图库当前没有符号链接, 所以不是"正在被利用"; 但如果要把 /img/ 通过隧道暴露出去,
+    #    这种深度防御不该留口子。)
     for root in IMG_ROOTS:
-        r = os.path.abspath(root)
+        r = os.path.realpath(os.path.abspath(root))
         try:
-            full = os.path.normpath(os.path.join(r, rel))
+            full = os.path.realpath(os.path.normpath(os.path.join(r, rel)))
             if os.path.commonpath([full, r]) == r and os.path.isfile(full):
                 return full
         except ValueError:                     # 不同盘符/无法比较

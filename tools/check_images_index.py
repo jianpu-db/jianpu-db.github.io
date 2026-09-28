@@ -14,6 +14,7 @@ CDN/对象存储去保证。发现"目录在、页不在"这种半坏状态才�
 用法: python3 tools/check_images_index.py [--data 目录] [--limit 报几条]
 """
 import argparse
+import collections
 import gzip
 import io
 import json
@@ -55,12 +56,32 @@ def main():
         print(f"跳过: 图片根本机没有({', '.join(roots)}) —— 静态部署时由 CDN/对象存储保证")
         return 0
 
+    # ⚠ 2026-09-28 修: 索引里的 `d` 是**相对图片根的父亲**写的(本机 = `<工作区>/jianpu2`),
+    #   而这里原来只拿 `WS`(= <工作区>) 拼一次 —— 于是 17167 条**全部**报"目录不存在",
+    #   而且因为 `continue`, 后面"整页图"那一段一条都没查(打印出 "0 张整页图" 就是这个迹象)。
+    #   而同一时刻 `/img/` 是能取到图的(GET 200, 12951 字节), 说明是**自检错了**, 不是索引坏了。
+    #   改成**逐个根试拼**(与 app/server.py 的 resolve_img 同一套根), 命中不了才算坏。
+    bases = []
+    for r in live:
+        for b in (r, os.path.dirname(r), WS):
+            if b not in bases:
+                bases.append(b)
+
+    def resolve(rel):
+        for b in bases:
+            full = os.path.join(b, rel)
+            if os.path.isdir(full):
+                return full, b
+        return None, None
+
     bad_dir, bad_page, bad_alt, n_page = [], [], [], 0
+    used_root = collections.Counter()
     for src, r in idx.items():
-        d = os.path.join(WS, r["d"])
-        if not os.path.isdir(d):
-            bad_dir.append((src, r["d"]))
+        d, base = resolve(r["d"])
+        if d is None:
+            bad_dir.append((src, r["d"] + "  (试过: " + ", ".join(bases) + ")"))
             continue
+        used_root[base] += 1
         for p in r["pg"]:
             n_page += 1
             fp = os.path.join(d, p[0])
@@ -69,10 +90,13 @@ def main():
             elif not p[1] or not p[2]:
                 bad_page.append((src, r["d"] + "/" + p[0] + " (没尺寸)"))
         for alt in r.get("alt") or []:
-            if not os.path.isdir(os.path.join(WS, alt[0])):
+            ad, _b = resolve(alt[0])
+            if ad is None:
                 bad_alt.append((src, alt[0]))
 
     print(f"原图索引 {len(idx)} 个 source / {n_page} 张整页图; 图片根 {len(live)} 个")
+    for b, c in used_root.most_common():
+        print(f"    {c:>6} 条落在 {b}")
     ok = True
     for what, rows in (("目录不存在", bad_dir), ("整页图不存在", bad_page), ("备选目录不存在", bad_alt)):
         if rows:

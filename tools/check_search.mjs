@@ -28,6 +28,29 @@ tk(parseQuery('63731232').length === 8 && parseQuery('12 345').length === 5,
    "纯数字/带空格的输入不受影响");
 if (tkFail) { console.log('\n贪心切 token 失败 ' + tkFail + ' 项'); process.exit(1); }
 
+// ---- 升降号口径(用户原话)：「输入 5 能匹配到 #5；输入 #5 匹配 #5 能更精确。发送从严、接收从宽。」----
+// 用例取自《U.N.オーエンは彼女なのか？》里 `2 2 2 6 4 #5 3 1 6 #5 7` 这一段
+// (全库只有 20 首带升降号, 这个用例很难得)。四条断言锁"接收从宽 / 发送从严 / 写反罚最重"。
+let accFail = 0;
+const ac = (cond, msg) => { console.log((cond ? '✓ ' : '✗ ') + msg); if (!cond) accFail++; };
+const ACC_SONG = 'U.N.オーエンは彼女なのか？';
+const topOf = (q) => {
+  const segs = [parseQuery(q)].filter((s) => s.length >= 5);
+  return search(idx, segs, { top: 1 })[0];
+};
+const accPlain = topOf('22264531657');        // 用户没写记号
+const accSharp = topOf('22264#5316#57');      // 用户写了 #
+const accFlat = topOf('22264b5316b57');       // 用户写反了
+ac(accPlain && accPlain.group === ACC_SONG,
+   `输入 5(不带记号) 仍能找到 #5 那首: ${accPlain && accPlain.group} —— 接收从宽`);
+ac(accSharp && accSharp.group === ACC_SONG && accSharp.cost === 0,
+   `输入 #5 精确命中, 代价 0(实测 ${accSharp && accSharp.cost}) —— 发送从严`);
+ac(accPlain && accSharp && accSharp.cost < accPlain.cost,
+   `带记号比不带更精确: ${accSharp && accSharp.cost} < ${accPlain && accPlain.cost}`);
+ac(accFlat && accPlain && accPlain.cost < accFlat.cost,
+   `记号写反罚最重: b 版 ${accFlat && accFlat.cost} > 不带 ${accPlain && accPlain.cost}`);
+if (accFail) { console.log('\n升降号口径失败 ' + accFail + ' 项'); process.exit(1); }
+
 // [查询, 期望曲名, 说明] —— 期望值以 Python 侧为基准
 const CASES = [
   // 2026-09-25 起按用户选的"段落权重参与排序"(B): 8 音的 63731232 在两首里都 0 代价,

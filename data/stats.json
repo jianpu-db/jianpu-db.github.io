@@ -36,24 +36,24 @@
       "kind": "db"
     }
   ],
-  "songs": 10325,
-  "notes": 1874620,
-  "groups": 8289,
+  "songs": 10417,
+  "notes": 1897776,
+  "groups": 8308,
   "sources": {
-    "qupu123": 5245,
-    "jianpucn": 3777,
-    "jianpujia": 1256,
+    "qupu123": 5246,
+    "jianpucn": 3778,
+    "jianpujia": 1346,
     "": 38,
     "unknown": 6,
     "qinyipu": 1,
     "21qupu": 1,
     "qpcxw": 1
   },
-  "bytes_gz": 4474080,
+  "bytes_gz": 4518750,
   "with_accidental": 20,
-  "with_raw": 10325,
-  "with_images": 10279,
-  "image_pages": 13571,
+  "with_raw": 10417,
+  "with_images": 10371,
+  "image_pages": 13700,
   "image_sources": 21384,
   "img_base": "/img/"
 }

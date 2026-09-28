@@ -4,8 +4,26 @@
 // (URL 参数会被忽略 —— 本脚本读本地 data/, 只为与 check_all.sh 的其他脚本统一调用方式。)
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
+import { buildIndex, search } from '../static/search.js';
+import { parseQuery } from '../static/jptok.js';
 const argv = process.argv.slice(2).filter((a) => !/^https?:\/\//.test(a));
-const QUERY = argv[0] || '33565653253';
+const SONGS_TXT = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8');
+
+// 查询片段**从"自带 MBID 的歌"自己的音高串里取**, 而且当场验证"它确实排第一" ——
+// 为什么不能写死: 语料一涨, 同一个片段的头名就会换(2026-09-28 实测: 语料 8926 -> 9340 后,
+// 写死的 `33565653253` 头名从《U.N.オーエン》/《神々》变成《你怎么说》—— 后者没有 MBID,
+// 于是下面两条"有 MBID 的卡必须有绿片"的断言把**正确的产品行为**报成了失败)。
+const _rows = SONGS_TXT.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+const _idx = buildIndex(SONGS_TXT);
+let AUTO_QUERY = '';
+for (const r of _rows) {
+  if (!r.mbid || (r.p || '').length < 15) continue;
+  const q = r.p.slice(0, 15);
+  const top = search(_idx, [parseQuery(q)], { top: 1 })[0];
+  if (top && top.group === r.g) { AUTO_QUERY = q; break; }
+}
+if (!AUTO_QUERY) { console.error('!! 找不到"自带 MBID 且自己排第一"的查询片段(语料异常?)'); process.exit(1); }
+const QUERY = argv[0] || AUTO_QUERY;
 const TQUERY = argv[1] || '神々';
 
 const els = {}, handlers = {};
@@ -81,11 +99,18 @@ ok(out.indexOf('class="nf"') >= 0 && out.indexOf('class="nf"') < out.indexOf('cl
 // 2026-09-25 用户: "我的 U.N.Owen 已经有 MusicBrainz 了, 你怎么还后面加个黄的链接?"
 // 口径: **按卡片**判断 —— 有 MBID 的那张卡: 绿色 MusicBrainz 必须有、黄色待补必须没有;
 // 没 MBID 的卡: 黄色待补照旧要有(别一刀切掉)。
-const c0 = out.indexOf('class="card');
-const firstCard = out.slice(c0, out.indexOf('class="card', c0 + 5));
-ok(/class="exact" href="https:\/\/musicbrainz\.org\/work\//.test(firstCard),
+// ⚠ 2026-09-28: 不能假定"有 MBID 的那首一定是第一张卡" —— 语料一涨, 同一查询的头名就会换
+//   (实测: 语料 8926 -> 9340 后, `3 3 5 6 5 6 5 3 2 5 3` 的头名从《U.N.オーエン》变成《你怎么说》,
+//    而后者没有 MBID -> 老写法把"正确的产品行为"报成了失败)。改成**找那张有绿片的卡**再断言。
+const mbidAt = out.indexOf('musicbrainz.org/work/');
+const mbidCard = mbidAt < 0 ? '' : (() => {
+  const s = out.lastIndexOf('class="card', mbidAt);
+  const e = out.indexOf('class="card', s + 5);
+  return out.slice(s, e < 0 ? undefined : e);
+})();
+ok(/class="exact" href="https:\/\/musicbrainz\.org\/work\//.test(mbidCard),
    '有 MBID 的歌给出 MusicBrainz 绿色片子（已收录）');
-ok(!/exact pending" href="https:\/\/musicbrainz\.org\/search/.test(firstCard),
+ok(mbidCard !== '' && !/exact pending" href="https:\/\/musicbrainz\.org\/search/.test(mbidCard),
    '这首已有 MusicBrainz -> 不再出现黄色待补片子');
 ok(/exact pending" href="https:\/\/musicbrainz\.org\/search/.test(out),
    '没有 MBID 的歌仍然给黄色 MusicBrainz 待补片子(没被一刀切掉)');

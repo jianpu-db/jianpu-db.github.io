@@ -47,15 +47,27 @@ def _sections_compact(r, n_notes):
     if not secs:
         return ""
     out, off = [], 0
+    tie, prev_key, last_note = False, None, False       # 与主循环同一口径: `X ~ X` 只算一个音
     for s in secs:
         name = (s.get("subtitle") or "").strip() or "score"
         cnt = 0
         for t in (s.get("score") or "").split():
-            if not parse(t):                 # 非音符 token: parse 可能直接返回 None
+            if t == "~":
+                tie = last_note
                 continue
-            d, _a, _o = parse(t)
-            if d is not None:
-                cnt += 1
+            if not parse(t):                 # 非音符 token: parse 可能直接返回 None
+                tie, prev_key, last_note = False, None, False
+                continue
+            d, ac, _o = parse(t)
+            if d is None:
+                tie, prev_key, last_note = False, None, False
+                continue
+            key = (d, ac)
+            if tie and prev_key == key:
+                tie, last_note = False, True
+                continue                     # 连音线的第二个音头(段内/跨段都并)
+            cnt += 1
+            tie, prev_key, last_note = False, key, True
         if cnt:
             out.append("%d:%s" % (off, name))
             off += cnt
@@ -166,15 +178,27 @@ def main():
             continue
         r = json.loads(ln)
         score = r.get("score") or ""
-        toks = [t for t in score.split() if parse(t)]
+        # ⚠ `~` 不是音符(parse 返回 None), 但**必须留下** —— 它是连音线记号, 下一轮要靠它判"两个音头并一个"
+        #   (2026-09-28: 以前这里直接滤掉, 于是站点索引里的音符数比语料多出 14455 个连音线音头)
+        toks = [t for t in score.split() if parse(t) or t == "~"]
         p, acc, oct_ = [], [], []
+        tie, prev_key, last_note = False, None, False   # 连音线 `X ~ X` 只算一个音(2026-09-28 口径)
         for t in toks:
+            if t == "~":
+                tie = last_note
+                continue
             d, ac, off = parse(t)
             if d is None:                     # 休止/念白: 不进音高, 但仍在 s 里显示
+                tie, prev_key, last_note = False, None, False
                 continue
+            key = (d, ac)
+            if tie and prev_key == key:
+                tie, last_note = False, True
+                continue                      # 连音线的第二个音头
             p.append(str(d))
             acc.append("1" if ac == 1 else "2" if ac == -1 else "0")
             oct_.append(str(off))
+            tie, prev_key, last_note = False, key, True
         if not p:
             continue
         src = r.get("source") or ""

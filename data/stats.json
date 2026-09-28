@@ -37,7 +37,7 @@
     }
   ],
   "songs": 8926,
-  "notes": 1611039,
+  "notes": 1610973,
   "groups": 8145,
   "sources": {
     "qupu123": 4396,
@@ -49,11 +49,11 @@
     "21qupu": 1,
     "qpcxw": 1
   },
-  "bytes_gz": 3992996,
+  "bytes_gz": 3992934,
   "with_accidental": 20,
   "with_raw": 8926,
   "with_images": 8884,
   "image_pages": 11485,
-  "image_sources": 17167,
+  "image_sources": 17381,
   "img_base": "/img/"
 }

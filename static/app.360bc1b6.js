@@ -1,4 +1,4 @@
-import { buildIndex, search } from './search.4e74a6ae.js';
+import { buildIndex, search } from './search.74c7ee4e.js';
 import { parseQuery, parseToken, isPitch, show } from './jptok.f2563838.js';
 
 /* 数据侧: 只需要"曲名 + 出处" 就能给出可点的外链 —— 不依赖任何 API/key */
@@ -358,6 +358,13 @@ var FIELD_VALUE = {
     return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + h.esc(src) + '</a>' : h.esc(src);
   },
   transcriber: function (r, h) { return r.transcriber && r.transcriber.length ? h.esc(h.list(r.transcriber)) : '—'; },
+  // 转写置信度(0~1): 老谱没这个字段时 build_web_data 给 0.5(中性), 这里区分"真的 0.5"与"没有"
+  confidence: function (r, h) {
+    if (r.conf == null) return '—';
+    var pct = Math.round(r.conf * 100);
+    var tag = r.conf >= 0.95 ? '高' : (r.conf >= 0.85 ? '中' : '低');
+    return h.esc(pct + '%（' + tag + '）');
+  },
   tags: function (r, h) { return r.tags && r.tags.length ? h.esc(h.list(r.tags)) : '—'; },
   usertags: function (r, h) { return r.usertags && r.usertags.length ? h.esc(h.list(r.usertags)) : '—'; },
   alias: function (r, h) { return r.alias && r.alias.length ? h.esc(h.list(r.alias)) : '—'; },

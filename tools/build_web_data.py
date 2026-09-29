@@ -241,6 +241,10 @@ def main():
                         list(r.get("artist") or []) + [t for t in (r.get("tag") or []) if not str(t).startswith("分类/")]]
                        or [0]),
             "transcriber": r.get("transcriber") or [],
+            # 转写置信度(2026-09-30 加): 曲谱头里的 `confidence=`(转写时每个数字 top-1 概率的平均)。
+            # 前端卡片显示它; 并列排序时它是"人工校对过"之后的次级证据。老谱没这个字段 -> 0.5 中性。
+            "conf": (float(r["confidence"]) if str(r.get("confidence") or "").strip()
+                     and str(r["confidence"]).replace(".", "", 1).isdigit() else 0.5),
         })
 
     outj = os.path.join(a.out, "songs.jsonl.gz")

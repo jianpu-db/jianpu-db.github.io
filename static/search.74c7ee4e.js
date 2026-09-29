@@ -196,8 +196,23 @@ export function search(idx, segs, opt) {
     }
     if (ok && det.length) res.push({ group, total, exact, det, secW, sec });
   }
+  // **并列时的"证据优先"键**(2026-09-30 加, 与离线 lookup.py 同口径):
+  //   ① 人工校对过(ok) 优先于机器转写(ocr) —— 实测 `33565653253` 那句: 《你怎么说》(ocr, 而且是
+  //      转写把"行尾 3- + 间奏括号"连读拼出来的假片段) 原来靠人气压过《神々が恋した幻想郷》(ok)。
+  //   ② 转写置信度高优先(谱级 `confidence=`, 转写时写; 老谱没有就当中性 0.5)。
+  //   ③ 版本多优先(同一首在库里有多份谱 -> 命中更可能是真的)。
+  //   之后才轮到段落权/人气/标题长度 —— 那些是"更像你想找的那首"的偏好, 与"这条谱可不可信"无关。
+  const okOf = (r) => ((r.det[0] && r.det[0].song.status === 'ok') ? 0 : 1);
+  const confOf = (r) => {
+    const c = parseFloat((r.det[0] && r.det[0].song.conf) || '');
+    return isNaN(c) ? 0.5 : c;
+  };
+  const versOf = (r) => ((idx.groups.get(r.group) || []).length);
   res.sort((x, y) =>
     x.total - y.total ||
+    okOf(x) - okOf(y) ||
+    confOf(y) - confOf(x) ||
+    versOf(y) - versOf(x) ||
     y.exact - x.exact ||
     (idx.pop.get(popKey(y.group)) || 0) - (idx.pop.get(popKey(x.group)) || 0) ||
     (idx.hot.get(y.group) || 0) - (idx.hot.get(x.group) || 0) ||   // 并列: 歌手在库里谱多的先
@@ -223,6 +238,7 @@ export function search(idx, segs, opt) {
       alias: h.song.alias, artist: h.song.artist, transcriber: h.song.transcriber, mbid: h.song.mbid,
       links: h.song.links || [], srcurl: h.song.srcurl || '',
       hot: idx.hot.get(r.group) || 0,
+      conf: (h.song.conf == null ? null : h.song.conf),   // 转写置信度(卡片要显示/并列要用)
       // **"这条命中到底有多硬"** —— 给前端提示用(2026-09-29):
       //   groupsAtBest = 代价并列(拿到同一个最好代价)的歌有几首; >1 说明"这句不是唯一命中";
       //   versions     = 这首歌在库里有几个版本; ==1 且 status=ocr 说明"没有第二个版本可交叉核对"。

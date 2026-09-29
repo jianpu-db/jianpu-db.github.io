@@ -94,6 +94,48 @@ function loadPlatforms(st) {
 }
 var ALROW_N = 0;                       // 每张卡一个就地输入框, 用 id 串起来(不靠 DOM 遍历)
 
+/* 卡片"一行一个属性"的展示规格 —— **单一真源是 `jianpu-db/schema.py` 的 FIELDS**, 经 data/stats.json 带过来。
+ * 用户口径(2026-09-29):
+ *   ① 每个属性的显示名**独立于属性本身**（不在这儿硬编码中文）—— 一律从 `label[<语言>]` 取,
+ *      取不到回落 zh, 再取不到才用第一个有的语言。这样加语言只要改 schema.py 一处。
+ *   ② 哪些**能改**、哪些**不能改**也由 schema 说了算(`editable` + `note`), 前端只照做:
+ *      能改的行尾画一颗 ＋, 不能改的把 note 挂在 title 上(鼠标停一下能看到为什么)。
+ * 下面这份兜底只在"stats 还没加载 / 独立部署 web"时用, 故意只留最小信息。
+ */
+var FIELDS = {
+  file: { label: { zh: '文件', en: 'File' }, kind: 'readonly' },
+  group: { label: { zh: '曲名', en: 'Title' }, kind: 'readonly' },
+  artist: { label: { zh: '歌手', en: 'Artist' }, kind: 'list', editable: true, hint: '邓丽君（多个用逗号）' },
+  status: { label: { zh: '状态', en: 'Status' }, kind: 'readonly' },
+  n: { label: { zh: '音符', en: 'Notes' }, kind: 'readonly' },
+  bars: { label: { zh: '小节', en: 'Bars' }, kind: 'readonly' },
+  source: { label: { zh: '出处', en: 'Source' }, kind: 'readonly' },
+  transcriber: { label: { zh: '转写', en: 'Transcriber' }, kind: 'readonly' },
+  tags: { label: { zh: '标签', en: 'Tags' }, kind: 'readonly' },
+  usertags: { label: { zh: '人标', en: 'Human tags' }, kind: 'list', editable: true, hint: '分类/儿歌, 民歌' },
+  alias: { label: { zh: '别名', en: 'Alias' }, kind: 'list', editable: true, hint: '另一个曲名' },
+  mbid: { label: { zh: 'MBID', en: 'MBID' }, kind: 'text', editable: true, hint: 'MusicBrainz work 的 UUID' },
+};
+function loadFields(st) {
+  if (!st || !st.fields) return;
+  var out = {};
+  Object.keys(st.fields).forEach(function (k) {
+    var f = st.fields[k] || {};
+    out[k] = { label: f.label || {}, kind: f.kind || 'readonly', editable: !!f.editable,
+               hint: f.hint || '', note: f.note || '', row: f.row !== false };
+  });
+  if (Object.keys(out).length) FIELDS = out;
+}
+// 当前界面语言(**只认浏览器语言的前两位**); schema 里的 label 是按语言的字典, 所以这里够用
+var LANG = (function () {
+  var l = (typeof navigator !== 'undefined' && navigator.language) || 'zh';
+  return String(l).slice(0, 2).toLowerCase();
+})();
+function fieldLabel(f) {
+  var lb = (f && f.label) || {}, keys = Object.keys(lb);
+  return lb[LANG] || lb.zh || (keys.length ? lb[keys[0]] : '');
+}
+
 /* **"这首歌已经有了哪些确切页"只有这一处口径** —— 绿色片子(exactLinks)和"还缺哪个平台"
  * 的判断都用它。2026-09-25 的 bug 就是这里漏了 MBID 那条: 绿色 MusicBrainz 片子已经画出来,
  * 平台循环却以为 MusicBrainz 还缺, 又补了一颗黄色"待补"片子(用户: "我的 U.N.Owen 已经有
@@ -267,30 +309,63 @@ function siteUrl(src) {
   return m[host] || '';
 }
 
+/* 每个属性的**值**怎么渲染(卡片表格里的那一列)。键与 FIELDS 同; 没列到的属性走 default 分支。
+ * 显示**名**不在这儿 —— 那是 schema 的事(见上面 FIELDS)。 */
+var FIELD_VALUE = {
+  file: function (r, h) { return r.file && r.file.length ? h.esc(h.list(r.file)) : '—'; },
+  group: function (r, h) { return h.esc(r.group); },
+  artist: function (r, h) { return r.artist && r.artist.length ? h.esc(h.list(r.artist)) : '—'; },
+  status: function (r, h) {
+    return h.esc(r.status || '?') + (r.status === 'ok' ? '（人工校对过）'
+      : r.status === 'ocr' ? '（图片机器转写）' : '');
+  },
+  n: function (r) { return r.n + ' 个'; },
+  bars: function (r) { return (r.bars || []).length + ' 小节 · ' + (r.bpb || 4) + ' 拍/小节'; },
+  source: function (r, h) {
+    var src = r.source || '';
+    if (!src) return '—';
+    var u = r.srcurl || sourceUrl(src);        // 优先链到原谱站**那一页**, 没有再退回站点首页
+    return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + h.esc(src) + '</a>' : h.esc(src);
+  },
+  transcriber: function (r, h) { return r.transcriber && r.transcriber.length ? h.esc(h.list(r.transcriber)) : '—'; },
+  tags: function (r, h) { return r.tags && r.tags.length ? h.esc(h.list(r.tags)) : '—'; },
+  usertags: function (r, h) { return r.usertags && r.usertags.length ? h.esc(h.list(r.usertags)) : '—'; },
+  alias: function (r, h) { return r.alias && r.alias.length ? h.esc(h.list(r.alias)) : '—'; },
+  mbid: function (r, h) {
+    return r.mbid ? '<a href="https://musicbrainz.org/work/' + encodeURIComponent(r.mbid) +
+      '" target="_blank" rel="noopener"><code>' + h.esc(r.mbid) + '</code></a>' : '—';
+  },
+};
+
+/* 能改的属性: 行尾一颗 ＋(与收录页那颗同形状), 点开就地输入 + 保存。
+ * 保存走 `POST /api/submit {kind:'attr', file, attr, value}` —— 服务端按 **同一份 schema** 再验一次
+ * (前端说能改不算数, 只读属性在服务端必须被拒)。 */
+function attrPlus(r, key) {
+  var f = FIELDS[key], file = (r.file && r.file[0]) || '';
+  if (!f || !f.editable || !file) return '';
+  var rid = 'attr' + (++ALROW_N);
+  return '<button type="button" class="plus attr-plus" data-row="' + rid + '" data-ph="' + esc(f.hint || '') +
+    '" data-file="' + esc(file) + '" data-attr="' + esc(key) + '" title="补 ' + esc(fieldLabel(f)) + '">＋</button>' +
+    '<span class="alrow" id="' + rid + '" hidden>' +
+      '<input class="al-url attr-val" placeholder="' + esc(f.hint || '') + '" spellcheck="false" />' +
+      '<button class="al-go-attr" data-file="' + esc(file) + '" data-attr="' + esc(key) + '">保存</button>' +
+      '<span class="al-msg"></span></span>';
+}
+
 function metaRows(r) {
   function list(x) { return (x || []).join('、'); }
-  var src = r.source || '';
-  var srcUrl = r.srcurl || sourceUrl(src);      // 优先链到原谱站**那一页**, 没有再退回站点首页
-  var rows = [
-    ['文件', r.file && r.file.length ? esc(list(r.file)) : '—'],
-    ['曲名', esc(r.group)],
-    ['歌手', r.artist && r.artist.length ? esc(list(r.artist)) : '—'],
-    ['状态', esc(r.status || '?') + (r.status === 'ok' ? '（人工校对过）'
-      : r.status === 'ocr' ? '（图片机器转写）' : '')],
-    ['音符', r.n + ' 个'],
-    ['小节', (r.bars || []).length + ' 小节 · ' + (r.bpb || 4) + ' 拍/小节'],
-    ['出处', src ? (srcUrl
-      ? '<a href="' + srcUrl + '" target="_blank" rel="noopener">' + esc(src) + '</a>'
-      : esc(src)) : '—'],
-    ['转写', r.transcriber && r.transcriber.length ? esc(list(r.transcriber)) : '—'],
-    ['标签', r.tags && r.tags.length ? esc(list(r.tags)) : '—'],
-    ['人标', r.usertags && r.usertags.length ? esc(list(r.usertags)) : '—'],
-    ['别名', r.alias && r.alias.length ? esc(list(r.alias)) : '—'],
-    ['MBID', r.mbid
-      ? '<a href="https://musicbrainz.org/work/' + encodeURIComponent(r.mbid) +
-        '" target="_blank" rel="noopener"><code>' + esc(r.mbid) + '</code></a>'
-      : '—'],
-  ];
+  var h = { esc: esc, list: list };
+  var rows = [];
+  Object.keys(FIELDS).forEach(function (key) {
+    var f = FIELDS[key] || {};
+    if (f.row === false) return;                       // 如"收录页": 它在卡片顶部是片子, 不做表格行
+    var render = FIELD_VALUE[key];
+    var val = render ? render(r, h) : '—';
+    var name = fieldLabel(f);
+    // 显示名那一列挂 title: 能改的说明怎么改, 不能改的说明为什么不能改(都来自 schema 的 note)
+    var note = f.note ? ' title="' + esc(f.note) + '"' : '';
+    rows.push(['<span' + note + '>' + esc(name) + '</span>', val + attrPlus(r, key)]);
+  });
   return '<table class="meta"><tbody>' +
     rows.map(function (x) { return '<tr><th>' + x[0] + '</th><td>' + x[1] + '</td></tr>'; }).join('') +
     '</tbody></table>';
@@ -434,6 +509,17 @@ function addLocalTags(file, tags) {
       if (t && s[k].indexOf(t) < 0) s[k].push(t);
     });
   });
+}
+
+/* 「＋ 补 <属性>」保存成功后**就地生效**(不等服务端两分钟重建索引) —— 与 addLocalTags 同一套路。
+ * 只处理 schema 里 editable 的那几个: 列表类追加、单值类替换。 */
+function addLocalAttr(file, key, value) {
+  var s = findSongByFile(file);
+  if (!s) return;
+  if (key === 'mbid') { s.mbid = value; return; }         // 单值: 替换(与 MBID= 写盘同义)
+  if (key === 'tags' || key === 'usertags') { addLocalTags(file, [value]); return; }
+  if (!s[key]) s[key] = [];
+  if (s[key].indexOf(value) < 0) s[key].push(value);      // 列表: 追加(服务端也是追加)
 }
 
 /* 卡片标题就是这一首的独立页面入口(用户 2026-09-25: "「本谱一页」不要放在下面的链接, 直接把标题做成超链接")
@@ -609,6 +695,42 @@ document.addEventListener('click', function (ev) {
     }).catch(function (e) { tb.disabled = false; tmsg.className = 'al-msg err'; tmsg.textContent = '失败：' + e.message; });
     return;
   }
+  // 「＋ 补 <属性>」: 卡片元数据行尾那颗 ＋ —— **哪些属性可改由 schema.py 决定**(前端只是照做)
+  var ab = ev.target && ev.target.closest ? ev.target.closest('.al-go-attr') : null;
+  if (ab) {
+    var abox = ab.closest('.alrow');
+    var ain = abox.querySelector('.attr-val');
+    var amsg = abox.querySelector('.al-msg');
+    var aval = (ain.value || '').trim();
+    if (!aval) { amsg.className = 'al-msg err'; amsg.textContent = '先填内容'; return; }
+    if (READONLY) { readonlyInto(amsg); return; }
+    ab.disabled = true; amsg.className = 'al-msg'; amsg.textContent = '保存中…';
+    fetch(API + '/api/submit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'attr', file: ab.getAttribute('data-file'),
+                             attr: ab.getAttribute('data-attr'), value: aval }),
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      ab.disabled = false;
+      if (j && j.ok) {
+        amsg.className = 'al-msg ok';
+        amsg.textContent = '已写入 ' + j.attr + '=' + (j.value || aval) + '（' + j.state + '）' +
+          (j.refresh ? '；' + (j.refresh_msg || '索引重建中') : '');
+        ain.value = '';
+        addLocalAttr(ab.getAttribute('data-file'), ab.getAttribute('data-attr'), j.value || aval);
+        // 就地重画当前这次渲染 -> 新值立刻出现(不等服务端重建)
+        var are = ab.getAttribute('data-re') || '';
+        setTimeout(function () {
+          if (are === 'title') rerunTitle();
+          else if (are === 'tune') showTune(CURRENT_TUNE);
+          else run({ preventDefault: function () {} });
+        }, 300);
+      } else {
+        amsg.className = 'al-msg err';
+        amsg.textContent = '失败：' + ((j && j.err) || '未知错误');
+      }
+    }).catch(function (e) { ab.disabled = false; amsg.className = 'al-msg err'; amsg.textContent = '失败：' + e.message; });
+    return;
+  }
   var b = ev.target && ev.target.closest ? ev.target.closest('.al-go') : null;
   if (!b) return;
   var box = b.closest('.addlink');
@@ -731,7 +853,7 @@ $('sfill').addEventListener('click', function () {
 loadCorpus().then(function (txt) {
   IDX = buildIndex(txt);
   return fetch(appUrl('data/stats.json')).then(function (r) { return r.json(); })
-    .then(function (st) { loadPlatforms(st); return st; });
+    .then(function (st) { loadPlatforms(st); loadFields(st); return st; });
 }).then(function (st) {
   // 只报"有多少东西可查"; 原图那栏早去掉了, 别再提(2026-09-25 用户: 文案从简)。
   $('stats').textContent = '语料 ' + st.songs + ' 首（' + st.groups + ' 组），' +

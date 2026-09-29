@@ -365,6 +365,11 @@ var FIELD_VALUE = {
     var tag = r.conf >= 0.95 ? '高' : (r.conf >= 0.85 ? '中' : '低');
     return h.esc(pct + '%（' + tag + '）');
   },
+  // 「最低那 10% 的分位」: 平均看着还行、个别音很虚时靠它发现(0.95 均值 + 0.42 p10 = 有虚音)
+  conf_p10: function (r, h) {
+    if (r.confP10 == null) return '—';
+    return h.esc(Math.round(r.confP10 * 100) + '%');
+  },
   tags: function (r, h) { return r.tags && r.tags.length ? h.esc(h.list(r.tags)) : '—'; },
   usertags: function (r, h) { return r.usertags && r.usertags.length ? h.esc(h.list(r.usertags)) : '—'; },
   alias: function (r, h) { return r.alias && r.alias.length ? h.esc(h.list(r.alias)) : '—'; },

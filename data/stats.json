@@ -120,6 +120,15 @@
       "kind": "readonly",
       "note": "转写模型对每个数字的 top-1 概率的平均; 越低越该人工看一眼"
     },
+    "conf_p10": {
+      "label": {
+        "zh": "置信（低 10%）",
+        "en": "Confidence p10"
+      },
+      "attr": null,
+      "kind": "readonly",
+      "note": "置信度最低那 10% 的分位值 —— 平均看着还行、个别音很虚时靠它发现"
+    },
     "tags": {
       "label": {
         "zh": "标签",
@@ -188,11 +197,11 @@
     "21qupu": 1,
     "qpcxw": 1
   },
-  "bytes_gz": 4745742,
+  "bytes_gz": 4749344,
   "with_accidental": 20,
   "with_raw": 10892,
   "with_images": 10846,
   "image_pages": 14779,
-  "image_sources": 25561,
+  "image_sources": 25562,
   "img_base": "/img/"
 }

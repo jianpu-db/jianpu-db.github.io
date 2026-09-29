@@ -247,6 +247,9 @@ def main():
             # 显示成"50%（低）"会让人以为这条谱转得很差, 那是假数。
             "conf": (float(r["confidence"]) if str(r.get("confidence") or "").strip()
                      and str(r["confidence"]).replace(".", "", 1).isdigit() else None),
+            # 置信度**最低 10% 的分位**: 平均值看不出的"个别音很虚"靠它看(0.95 均值 / 0.42 p10)
+            "confP10": (float(r["conf_p10"]) if str(r.get("conf_p10") or "").strip()
+                        and str(r["conf_p10"]).replace(".", "", 1).isdigit() else None),
         })
 
     outj = os.path.join(a.out, "songs.jsonl.gz")

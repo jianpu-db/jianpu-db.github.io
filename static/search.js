@@ -239,6 +239,7 @@ export function search(idx, segs, opt) {
       links: h.song.links || [], srcurl: h.song.srcurl || '',
       hot: idx.hot.get(r.group) || 0,
       conf: (h.song.conf == null ? null : h.song.conf),   // 转写置信度(卡片要显示/并列要用)
+      confP10: (h.song.confP10 == null ? null : h.song.confP10),
       // **"这条命中到底有多硬"** —— 给前端提示用(2026-09-29):
       //   groupsAtBest = 代价并列(拿到同一个最好代价)的歌有几首; >1 说明"这句不是唯一命中";
       //   versions     = 这首歌在库里有几个版本; ==1 且 status=ocr 说明"没有第二个版本可交叉核对"。

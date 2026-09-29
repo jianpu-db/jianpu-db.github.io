@@ -242,9 +242,11 @@ def main():
                        or [0]),
             "transcriber": r.get("transcriber") or [],
             # 转写置信度(2026-09-30 加): 曲谱头里的 `confidence=`(转写时每个数字 top-1 概率的平均)。
-            # 前端卡片显示它; 并列排序时它是"人工校对过"之后的次级证据。老谱没这个字段 -> 0.5 中性。
+            # 前端卡片显示它; 并列排序时它是"人工校对过"之后的次级证据。
+            # **老谱没这个字段 -> 写 None(不是 0.5)**: 卡片显示"—", 排序侧才用 0.5 当中性 ——
+            # 显示成"50%（低）"会让人以为这条谱转得很差, 那是假数。
             "conf": (float(r["confidence"]) if str(r.get("confidence") or "").strip()
-                     and str(r["confidence"]).replace(".", "", 1).isdigit() else 0.5),
+                     and str(r["confidence"]).replace(".", "", 1).isdigit() else None),
         })
 
     outj = os.path.join(a.out, "songs.jsonl.gz")

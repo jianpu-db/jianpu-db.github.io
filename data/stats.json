@@ -111,6 +111,15 @@
       "kind": "readonly",
       "note": "jianpu2-auto=流水线转的; 人工投稿由投稿流程写入"
     },
+    "confidence": {
+      "label": {
+        "zh": "置信度",
+        "en": "Confidence"
+      },
+      "attr": null,
+      "kind": "readonly",
+      "note": "转写模型对每个数字的 top-1 概率的平均; 越低越该人工看一眼"
+    },
     "tags": {
       "label": {
         "zh": "标签",
@@ -166,24 +175,24 @@
       "note": "必须人工核对过的**确切页面**; 原谱站那一页能推出时由 source_pages.json 自动带"
     }
   },
-  "songs": 10774,
-  "notes": 1977697,
+  "songs": 10834,
+  "notes": 2005460,
   "groups": 8464,
   "sources": {
-    "qupu123": 5419,
-    "jianpucn": 3789,
-    "jianpujia": 1519,
+    "qupu123": 5450,
+    "jianpucn": 3799,
+    "jianpujia": 1538,
     "": 38,
     "unknown": 6,
     "qinyipu": 1,
     "21qupu": 1,
     "qpcxw": 1
   },
-  "bytes_gz": 4671303,
+  "bytes_gz": 4710252,
   "with_accidental": 20,
-  "with_raw": 10774,
-  "with_images": 10728,
-  "image_pages": 14341,
+  "with_raw": 10834,
+  "with_images": 10788,
+  "image_pages": 14520,
   "image_sources": 25561,
   "img_base": "/img/"
 }

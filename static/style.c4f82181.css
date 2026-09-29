@@ -44,6 +44,18 @@ table.meta { border-collapse: collapse; margin: .5rem 0 .2rem; font-size: .88rem
 table.meta th { text-align: left; font-weight: 500; color: var(--dim); padding: .1rem .6rem .1rem 0;
   white-space: nowrap; vertical-align: top; width: 4.5em; }
 table.meta td { padding: .1rem 0; vertical-align: top; word-break: break-word; }
+/* 元数据行尾那颗 ＋：**只有 schema 里 editable 的属性才有**(能由人补值), 与收录页那颗同形状。
+   显示名与"能不能改"都来自 jianpu-db/schema.py:FIELDS, 前端不写死中文串(见 app.js 注释)。 */
+table.meta .plus { width: 1.25rem; height: 1.25rem; padding: 0; border-radius: 50%;
+  border: 1px solid var(--line); background: #fff; color: var(--dim);
+  font-size: .85rem; line-height: 1; cursor: pointer; margin-left: .35rem; vertical-align: middle; }
+table.meta .plus:hover { border-color: #1c5c1c; color: #1c5c1c; }
+table.meta td .alrow { margin-top: .25rem; }
+table.meta td .alrow input.al-url { width: min(24rem, 92%); font-family: inherit; font-size: .84rem;
+  padding: .2rem .45rem; border: 1px solid var(--line); border-radius: 5px; }
+table.meta td .alrow button.al-go-attr { font-size: .84rem; padding: .2rem .7rem; border-radius: 5px;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+table.meta td .alrow button.al-go-attr[disabled] { opacity: .5; cursor: default; }
 
 .cmp { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .88rem; margin-top: .5rem; color: #3a4149; }
 .cmp .lab { color: var(--dim); font-family: system-ui, sans-serif; font-size: .84rem; }

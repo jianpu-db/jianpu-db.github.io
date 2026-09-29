@@ -48,7 +48,14 @@ global.fetch = async (u) => {
     return { ok: true, body: new Response(buf).body, json: async () => ({}) };
   }
   if (String(u).endsWith('stats.json')) {
-    return { ok: true, json: async () => JSON.parse(readFileSync(new URL('../data/stats.json', import.meta.url), 'utf8')) };
+    // **故意把两个字段的显示名改掉**: 卡片上要是还印出"歌手/人标", 就说明前端把中文名**硬编码**了。
+    // 显示名的唯一真源是 jianpu-db/schema.py:FIELDS -> stats.json(fields), 前端只许照着画。
+    const st = JSON.parse(readFileSync(new URL('../data/stats.json', import.meta.url), 'utf8'));
+    if (st.fields && st.fields.artist && st.fields.usertags) {
+      st.fields.artist.label.zh = '歌手X';
+      st.fields.usertags.label.zh = '人标X';
+    }
+    return { ok: true, json: async () => st };
   }
   return { ok: false, status: 404, json: async () => ({}) };
 };
@@ -80,11 +87,25 @@ ok(out.length > 200, '#out 真的渲染出了内容');
 ok(!/undefined|NaN|\[object Object\]/.test(out), 'HTML 里没有 undefined / NaN / [object Object]');
 for (const [name, re] of [['卡片', /class="card/], ['标黑', /<mark>/], ['收录页那行', /class="lab">收录页/],
                           ['待补充或精确链接', /(class="exact"|待补充)/], ['黄色待补片(指向搜索页的链接)', /<a class="exact pending" href=/], ['圆形 ＋', /class="plus"/],
-                          ['歌手行', /<th>歌手<\/th>/],
+                          ['歌手行(显示名来自 schema, 不是硬编码)', /<th><span[^>]*>歌手X<\/span><\/th>/],
                           ['本谱一页(通向 /s/<id> 的站内链接)', /class="title tune" href="[^"]*\/s\//],
                           ['补收录页表单', /class="addlink"/], ['小节线', /class="bar"/]]) {
   ok(re.test(out), '结果卡里有「' + name + '」');
 }
+
+/* 2026-09-29 用户: "这些标签最好也加个加号, 当然要在 schema 里注明哪些是可以修改哪些是不能修改的。
+ * 另外不要对这些硬编码, 每一个 attribute 的名字应该独立于这个 attribute, 以方便多语言支持。"
+ * -> 能改的属性(歌手/人标/别名/MBID)行尾要有 ＋; 只读属性(文件/曲名/状态/音符/小节/出处/转写/标签)
+ *    一颗都不能有; 显示名一律从 schema 来(上面故意改过名, 这里就能验出来)。 */
+for (const k of ['artist', 'usertags', 'alias', 'mbid']) {
+  ok(new RegExp('class="plus attr-plus"[^>]*data-attr="' + k + '"').test(out),
+     '可改属性有 ＋: ' + k);
+}
+for (const k of ['file', 'group', 'status', 'n', 'bars', 'source', 'transcriber', 'tags']) {
+  ok(!new RegExp('data-attr="' + k + '"').test(out), '只读属性没有 ＋: ' + k);
+}
+ok(!/<th><span[^>]*>人标<\/span><\/th>/.test(out) && !/<th><span[^>]*>歌手<\/span><\/th>/.test(out),
+   '没有把显示名硬编码在 app.js 里(schema 改名后卡片跟着变)');
 // 2026-09-25 用户: "「本谱一页」不要放在下面的链接, 直接把标题做成超链接"
 // -> 卡片标题本身就是 /s/<id> 的入口, 而且**不再**有单独的「本谱一页」片子。
 const titleLink = (out.match(/<a class="title tune" href="([^"]+)" data-tune="([^"]+)"/) || []);

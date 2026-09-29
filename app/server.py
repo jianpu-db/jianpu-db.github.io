@@ -27,6 +27,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -102,10 +103,22 @@ REFRESH_PENDING = os.path.join(HERE_WEB, "data", ".refresh.pending")
 def start_refresh():
     """后台重建索引: parse_scores(重建 data.jsonl/bars) + build_web_data(前端索引)。
     返回 (是否已排上, 说明)。若正有一轮在跑: 放一个 pending 标记让它在跑完后**再来一轮**,
-    免得这一次保存的链接被漏掉(并发缺口)。"""
-    script = os.path.join(HERE_WEB, "tools", "refresh.sh")
-    if not os.path.isfile(script):
-        return False, "没有 tools/refresh.sh"
+    免得这一次保存的链接被漏掉(并发缺口)。
+
+    跑哪一份: **有 bash 就跑 refresh.sh**(它是最早的实现), 没有就用 Python 版 `tools/refresh.py`
+    —— 实测 Windows 开发机上没有 bash, 于是"保存成功但 index 不重建"(返回 refresh:false +
+    FileNotFoundError), 卡片要等下一次流水线才变。两份步骤一致(同锁、同 pending、同三轮)。
+    """
+    sh = os.path.join(HERE_WEB, "tools", "refresh.sh")
+    pyf = os.path.join(HERE_WEB, "tools", "refresh.py")
+    if shutil.which("bash") and os.path.isfile(sh):
+        cmd = ["bash", sh]
+    elif os.path.isfile(pyf):
+        cmd = [sys.executable, "-u", pyf]
+    elif os.path.isfile(sh):
+        cmd = ["bash", sh]
+    else:
+        return False, "没有 tools/refresh.sh 也没有 tools/refresh.py"
     if os.path.exists(REFRESH_LOCK):
         try:
             if time.time() - os.path.getmtime(REFRESH_LOCK) < 600:
@@ -118,7 +131,7 @@ def start_refresh():
         with io.open(REFRESH_LOCK, "w", encoding="utf-8") as g:
             g.write(str(os.getpid()))
         with io.open(REFRESH_LOG, "ab") as g:
-            subprocess.Popen(["bash", script], cwd=HERE_WEB, stdout=g, stderr=subprocess.STDOUT,
+            subprocess.Popen(cmd, cwd=HERE_WEB, stdout=g, stderr=subprocess.STDOUT,
                              start_new_session=True)
         return True, "已开始重建(约 2 分钟)"
     except Exception as e:
@@ -203,6 +216,85 @@ def save_tags(payload, note="", contact=""):
     refresh, why = start_refresh()
     return 200, {"ok": True, "file": base, "state": "已写入", "committed": rc == 0,
                  "git": out[-300:] if rc else "", "tags": added,
+                 "refresh": refresh, "refresh_msg": why}
+
+
+def _editable_fields():
+    """可改属性的**白名单** —— 从 `data/stats.json` 的 `fields` 读（那份是 jianpu-db/schema.py:FIELDS 的副本）。
+
+    为什么不直接 `import schema`：schema.py 一 import 就读 cwd 下的 tags.json（见它文件头），
+    网页服务不该被那个绊住。读不到就返回空 = **一个都不许改**（宁可拒写，也不放未校验的字段名进来）。
+    """
+    try:
+        with io.open(os.path.join(HERE_WEB, "data", "stats.json"), encoding="utf-8") as f:
+            st = json.load(f)
+        return {k: v for k, v in (st.get("fields") or {}).items() if v.get("editable")}
+    except Exception:
+        return {}
+
+
+_MBID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def save_attr(payload, note="", contact=""):
+    """人工补某个**可改属性**（schema 说了算）: 校验 -> 留档 -> 写进曲谱 -> git commit -> 后台重建。
+
+    与 save_tags 同一套路。写入仍然是 `jianpu-db/linkurl.py` 那一份实现：
+      * kind=list -> add_list_item（追加，逗号分隔、大小写不敏感去重；usertag 走 add_usertag 以便清 todo）
+      * kind=text -> add_field（替换；MBID 允许贴 MusicBrainz 页面 URL，这里只取里面的 uuid）
+    前端那颗 ＋ 是照 schema 画的，但**能不能改写在这儿说了算** —— 只读属性在这里必须被拒。
+    """
+    if linkurl is None:
+        return 500, {"ok": False, "err": f"找不到 linkurl.py —— JIANPU_DB={DB} 对吗?"}
+    rawf = _as_text(payload.get("file"))
+    base = os.path.basename(rawf)
+    if not base or base != rawf or not base.endswith(".txt"):
+        return 400, {"ok": False, "err": "文件名不合法"}
+    path = os.path.join(DB, "scores", base)
+    if not os.path.isfile(path):
+        return 400, {"ok": False, "err": "语料里没有这份曲谱: " + base}
+    key = _as_text(payload.get("attr")).strip()
+    spec = _editable_fields().get(key)
+    if not spec:
+        return 400, {"ok": False, "err": f"这个属性不能改（不在 schema 的可改白名单里）: {key or '(空)'}"}
+    value = _as_text(payload.get("value")).strip()
+    if not value:
+        return 400, {"ok": False, "err": "值是空的"}
+    if len(value) > 300:
+        return 400, {"ok": False, "err": "值太长（>300 字）"}
+    attr = (spec.get("attr") or key)
+    kind = spec.get("kind") or "text"
+    if key == "mbid":
+        m = _MBID_RE.search(value)
+        if not m:
+            return 400, {"ok": False, "err": "MBID 要是一个 UUID（或 MusicBrainz work 页面 URL）"}
+        value = m.group(0).lower()
+    os.makedirs(FEEDBACK, exist_ok=True)
+    rid = _unique_rid(time.strftime("%Y%m%d-%H%M%S") + "-attr-" + _safe(base[:-4], 20))
+    with io.open(os.path.join(FEEDBACK, rid + ".json"), "w", encoding="utf-8", newline="\n") as g:
+        g.write(json.dumps({"id": rid, "kind": "attr", "file": base, "attr": key, "value": value,
+                            "note": note, "contact": contact,
+                            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "ip": payload.get("_ip", "")}, ensure_ascii=False, indent=2))
+    try:
+        if kind == "list" and attr == "usertag":
+            state = linkurl.add_usertag(path, value, clear_todo=value.startswith("分类/"))
+        elif kind == "list":
+            state = linkurl.add_list_item(path, attr, value)
+        else:
+            state = linkurl.add_field(path, attr, value)
+    except ValueError as e:
+        return 400, {"ok": False, "err": str(e)}
+    except Exception as e:
+        return 500, {"ok": False, "err": f"{type(e).__name__}: {e}"}
+    if state == "exists":
+        return 200, {"ok": True, "file": base, "attr": key, "value": value, "state": "已存在",
+                     "committed": False, "refresh": False}
+    rel = os.path.join("scores", base)
+    rc, out = _git_commit(f"{key}: {base} —— 人工补 {attr}={value}", [rel])
+    refresh, why = start_refresh()
+    return 200, {"ok": True, "file": base, "attr": key, "value": value, "state": "已写入",
+                 "committed": rc == 0, "git": out[-300:] if rc else "",
                  "refresh": refresh, "refresh_msg": why}
 
 
@@ -299,11 +391,13 @@ def handle_submit(payload):
     score = _as_text(payload.get("score")).strip()
     note = _as_text(payload.get("note")).strip()
     contact = _as_text(payload.get("contact")).strip()
-    # ①a kind=link / kind=tags: 身份是**文件**而不是曲名 -> 不走"请填曲名"与建谱流程
+    # ①a kind=link / kind=tags / kind=attr: 身份是**文件**而不是曲名 -> 不走"请填曲名"与建谱流程
     if kind == "link":
         return save_link(payload, note, contact)
     if kind == "tags":
         return save_tags(payload, note, contact)
+    if kind == "attr":
+        return save_attr(payload, note, contact)
     if not title:
         return 400, {"ok": False, "err": "请填曲名"}
     ts = time.strftime("%Y%m%d-%H%M%S")

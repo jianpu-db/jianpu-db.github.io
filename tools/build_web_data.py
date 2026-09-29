@@ -260,13 +260,18 @@ def main():
     # 收录平台表(搜索页格式的**唯一真源**在 jianpu-db/schema.py) -> 塞进 stats.json 给前端读。
     # 前端不自己写一份, 免得"每个平台的搜索 URL 长什么样"漂成两处。
     platforms = []
+    fields = {}
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__)))), "jianpu-db"))
         import schema as _schema
         platforms = list(getattr(_schema, "PLATFORMS", []))
+        # 卡片"一行一个属性"的展示规格(显示名/能不能改/输入提示) —— **唯一真源是 jianpu-db/schema.py:FIELDS**。
+        # 用户口径(2026-09-29): 属性名不许硬编码在前端(要能多语言), 且要注明哪些可改哪些不可改。
+        # 这里原样带过去(连顺序), 前端不再自带中文串。
+        fields = dict(getattr(_schema, "FIELDS", {}))
     except Exception as e:                       # jianpu-db 不在旁边(如独立部署 web) -> 前端会用内建兜底
-        print(f"  ! 读不到 schema.PLATFORMS({type(e).__name__}), 前端将用内建兜底表")
+        print(f"  ! 读不到 schema.PLATFORMS/FIELDS({type(e).__name__}), 前端将用内建兜底表")
     # 原图索引(每谱一页要用): 扫描逻辑只在 tools/build_image_index.py 一处
     img_index, img_st = {}, {}
     if not a.no_images:
@@ -295,7 +300,7 @@ def main():
             raise SystemExit(3)
     with_images = sum(1 for r in rows if r["s"] and r["s"] in img_index)
     image_pages = sum(len(img_index[r["s"]]["pg"]) for r in rows if r["s"] in img_index)
-    stats = {"platforms": platforms,
+    stats = {"platforms": platforms, "fields": fields,
              "songs": len(rows), "notes": notes, "groups": len({r["g"] for r in rows}),
              "sources": dict(sorted(srcs.items(), key=lambda x: -x[1])),
              "bytes_gz": os.path.getsize(outj),

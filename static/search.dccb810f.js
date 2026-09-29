@@ -207,7 +207,9 @@ export function search(idx, segs, opt) {
     const c = parseFloat((r.det[0] && r.det[0].song.conf) || '');
     return isNaN(c) ? 0.5 : c;
   };
-  const versOf = (r) => ((idx.groups.get(r.group) || []).length);
+  // **按"不同 source"数版本**(2026-09-30): 语料里 888 个 source 有 1,835 份成品(同一页被转过两遍),
+  // 按文件数数版本会把重复稿当成两个版本 -> "版本多优先"这条并列依据被灌水。
+  const versOf = (r) => new Set((idx.groups.get(r.group) || []).map((s) => s.src || s.s || '')).size;
   res.sort((x, y) =>
     x.total - y.total ||
     okOf(x) - okOf(y) ||

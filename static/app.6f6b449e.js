@@ -1,4 +1,4 @@
-import { buildIndex, search } from './search.74c7ee4e.js';
+import { buildIndex, search } from './search.76a637d1.js';
 import { parseQuery, parseToken, isPitch, show } from './jptok.f2563838.js';
 
 /* 数据侧: 只需要"曲名 + 出处" 就能给出可点的外链 —— 不依赖任何 API/key */
@@ -364,6 +364,11 @@ var FIELD_VALUE = {
     var pct = Math.round(r.conf * 100);
     var tag = r.conf >= 0.95 ? '高' : (r.conf >= 0.85 ? '中' : '低');
     return h.esc(pct + '%（' + tag + '）');
+  },
+  // 「最低那 10% 的分位」: 平均看着还行、个别音很虚时靠它发现(0.95 均值 + 0.42 p10 = 有虚音)
+  conf_p10: function (r, h) {
+    if (r.confP10 == null) return '—';
+    return h.esc(Math.round(r.confP10 * 100) + '%');
   },
   tags: function (r, h) { return r.tags && r.tags.length ? h.esc(h.list(r.tags)) : '—'; },
   usertags: function (r, h) { return r.usertags && r.usertags.length ? h.esc(h.list(r.usertags)) : '—'; },

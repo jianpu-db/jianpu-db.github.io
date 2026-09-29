@@ -241,7 +241,37 @@ function issueUrl(text) {
  *      高亮与小节线整体前移(用户实测: th10_06 开头 `c0 q0` 被误标黑, 第一条 `|` 画到 `q3 q3` 之后)。
  * 口径只能有一份: jptok.isPitch。
  */
-export function renderScore(raw, at, qlen, bars) {
+export /* 卡片上的**提示文案**(按语言)。与 schema 里的属性名一样, 文案不许散落在各处:
+ * 这里集中一份, 按 LANG 取, 取不到回落 zh。 */
+var TXT = {
+  tied: { zh: '并列：另有 {n} 首同分', en: '{n} more song(s) tie at this cost' },
+  tiedTip: { zh: '这句不是唯一命中 —— 后面并列的那几首要一起看, 别把第一条当铁证',
+             en: 'not a unique match — check the tied results too' },
+  onlyOne: { zh: '独证：本曲仅此一版', en: 'single version of this song' },
+  onlyOneTip: { zh: '这首歌在库里只有这一个版本, 而且是**机器转写**（没有第二个版本可交叉核对）',
+                en: 'only one version in the corpus, and it is machine-transcribed' },
+};
+function t(key, vars) {
+  var e = TXT[key] || {};
+  var s = e[LANG] || e.zh || '';
+  return String(s).replace(/\{(\w+)\}/g, function (m, k) { return (vars && vars[k] != null) ? vars[k] : m; });
+}
+
+/* 「这条命中到底有多硬」的提示片子(2026-09-29 用户口径: 别让人把转写噪声当铁证)。
+ * 依据来自 search.js 给的两个字段: groupsAtBest(同代价并列几首) / versions(本曲几个版本)。 */
+function cautionChips(r) {
+  var out = '';
+  if (r.cost === 0 && (r.groupsAtBest || 1) > 1) {
+    var n = r.groupsAtBest - 1;
+    out += '<span class="warn" title="' + esc(t('tiedTip')) + '">' + esc(t('tied', { n: n })) + '</span>';
+  }
+  if ((r.versions || 0) === 1 && r.status === 'ocr') {
+    out += '<span class="warn" title="' + esc(t('onlyOneTip')) + '">' + esc(t('onlyOne')) + '</span>';
+  }
+  return out;
+}
+
+function renderScore(raw, at, qlen, bars) {
   if (!raw) return '';
   var toks = raw.split(' ');
   var barSet = {};
@@ -565,6 +595,7 @@ function render(segs, res, ms) {
         '<span class="badge">记号 ' + r.exact + '/' + r.qlen + '</span>' +
         '<span class="badge">' + r.n + ' 音符</span>' +
         '<span class="badge">' + esc(r.status || '?') + '</span>' +
+        cautionChips(r) +
       '</div>' +
       metaRows(r) +
       '<div class="cmp"><span class="lab">库内该段' + (r.secCn ? '（' + esc(r.secCn) + '）' : '') + '</span> ' + esc(show(r.libNotes)) +

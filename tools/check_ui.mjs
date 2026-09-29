@@ -231,5 +231,19 @@ if (sf) {
   ok(posts.length === n && /请填曲名/.test(mkEl('sstatus').textContent), '空曲名本地拦住, 不发请求');
 }
 
+/* 放在**最后**跑: 2026-09-29 用户口径"别让人把转写噪声当铁证" —— 同代价并列 / 本曲仅此一版
+ * 且机器转写, 卡片上要出提示片子(class="warn")。用**已知会并列**的那句 `33565653253` 验:
+ * 它同时代价 0 命中《你怎么说》(ocr) 与《神々が恋した幻想郷》(ok)。
+ * (⚠ 必须放最后: 它会把"上一次命中的文件"改成你怎么说_2, 影响上面投稿类的断言。) */
+{
+  mkEl('q').value = '33565653253';
+  handlers['form'].submit({ preventDefault() {} });
+  await sleep(600);
+  const wout = mkEl('out').innerHTML;
+  ok(/class="warn"/.test(wout), '并列/独证 提示片子出现在卡片上');
+  ok(new RegExp('并列：另有 \\d+ 首同分').test(wout), '提示文案说清了"另有几首同分"');
+  ok(/title="这句不是唯一命中[^"]*"/.test(wout), '提示片子的 title 解释了"别当铁证"');
+}
+
 console.log(fail === 0 ? '\nUI 渲染自检 通过' : `\nUI 渲染自检 失败 ${fail} 项`);
 process.exitCode = fail ? 1 : 0;

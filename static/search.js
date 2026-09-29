@@ -205,6 +205,10 @@ export function search(idx, segs, opt) {
     (BAD.test(x.group) ? 1 : 0) - (BAD.test(y.group) ? 1 : 0) ||
     x.group.length - y.group.length ||
     (x.group < y.group ? -1 : 1));
+  // **代价并列有几首**: 排序后与头名同代价的组数(前端据此提示"这句不是唯一命中")
+  const bestTotal = res.length ? res[0].total : 0;
+  let groupsAtBest = 0;
+  for (const r of res) if (r.total === bestTotal) groupsAtBest++;
   return res.slice(0, top).map((r) => {
     const h = r.det[0];
     const n = h.q.length;
@@ -219,6 +223,13 @@ export function search(idx, segs, opt) {
       alias: h.song.alias, artist: h.song.artist, transcriber: h.song.transcriber, mbid: h.song.mbid,
       links: h.song.links || [], srcurl: h.song.srcurl || '',
       hot: idx.hot.get(r.group) || 0,
+      // **"这条命中到底有多硬"** —— 给前端提示用(2026-09-29):
+      //   groupsAtBest = 代价并列(拿到同一个最好代价)的歌有几首; >1 说明"这句不是唯一命中";
+      //   versions     = 这首歌在库里有几个版本; ==1 且 status=ocr 说明"没有第二个版本可交叉核对"。
+      // 起因: 实测《你怎么说》那句 `33565653253` 是转写把"行尾 3- + 间奏括号"连读拼出来的假片段,
+      //       而它当时是**代价 0 的唯一排前**(另一首同分的《神々》排在后面) —— 前端应该把这件事说出来。
+      groupsAtBest: groupsAtBest,
+      versions: (idx.groups.get(r.group) || []).length,
       sec: r.sec || '', secW: r.secW || 1.0, secCn: secLabelOf(r.sec),
       libNotes: Array.from({ length: n }, (_, k) => ({ d: arr.P[h.at + k], acc: arr.A[h.at + k] })),
       qNotes: h.q,

@@ -79,6 +79,9 @@ table.meta td .alrow button.al-go-attr[disabled] { opacity: .5; cursor: default;
 /* 未收录: **与已收录同形状的黄色片子**, 点进去是该平台的搜索页(用户口径 2026-09-24) */
 .links .exact.pending { background: #fff8e1; border-color: #f0d489; color: #8a6100; font-weight: 500; }
 .links .exact.pending:hover { border-color: #d9a300; }
+/* 「这条命中有多硬」的提示片子: 同代价并列 / 本曲仅此一版且是机器转写(见 app.js:cautionChips) */
+.card .warn { font-size: .78rem; color: #8a2a00; background: #fff1e6; border: 1px solid #f0b98a;
+  border-radius: 999px; padding: .05rem .5rem; margin-left: .35rem; cursor: help; white-space: nowrap; }
 /* 灰色片子后面那颗**圆形 ＋**: 点了就地粘网址, 保存后自动变绿 */
 .links .plus { width: 1.45rem; height: 1.45rem; padding: 0; border-radius: 50%;
   border: 1px solid var(--line); background: #fff; color: var(--dim);

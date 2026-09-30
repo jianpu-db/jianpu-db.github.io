@@ -184,24 +184,24 @@
       "note": "必须人工核对过的**确切页面**; 原谱站那一页能推出时由 source_pages.json 自动带"
     }
   },
-  "songs": 10892,
-  "notes": 2031874,
+  "songs": 10914,
+  "notes": 2036749,
   "groups": 8464,
   "sources": {
-    "qupu123": 5468,
-    "jianpucn": 3805,
-    "jianpujia": 1572,
+    "qupu123": 5488,
+    "jianpucn": 3806,
+    "jianpujia": 1573,
     "": 38,
     "unknown": 6,
     "qinyipu": 1,
     "21qupu": 1,
     "qpcxw": 1
   },
-  "bytes_gz": 4756641,
+  "bytes_gz": 4761076,
   "with_accidental": 20,
-  "with_raw": 10892,
-  "with_images": 10846,
-  "image_pages": 14779,
+  "with_raw": 10914,
+  "with_images": 10868,
+  "image_pages": 14828,
   "image_sources": 25576,
   "img_base": "/img/"
 }

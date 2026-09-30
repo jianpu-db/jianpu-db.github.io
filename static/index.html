@@ -18,6 +18,17 @@
 <meta property="og:image" content="https://jianpu-db.org/static/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="jianpu-db：通过简谱旋律查歌 —— 一行简谱数字 5 6 5 3 2 1 2 | 3 5 6 5 3">
+<!-- 结构化数据（2026-09-30）: 告诉搜索引擎"这是个能站内搜的站点"。
+     `?q=` 前端本来就支持（app.js: `?q=… -> 直接替用户查一次`），所以 SearchAction 是真能用的。 -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"jianpu-db",
+ "alternateName":"简谱旋律查歌","url":"https://jianpu-db.org/","inLanguage":"zh-CN",
+ "description":"只哼开头几个音，从一万多首简谱里把这首歌找出来；检索完全在浏览器里跑。",
+ "potentialAction":{"@type":"SearchAction",
+   "target":{"@type":"EntryPoint","urlTemplate":"https://jianpu-db.org/?q={search_term_string}"},
+   "query-input":"required name=search_term_string"}}
+</script>
 <meta property="og:locale" content="zh_CN">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="jianpu-db | 通过简谱旋律查歌">

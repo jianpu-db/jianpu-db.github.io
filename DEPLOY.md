@@ -11,6 +11,11 @@
 
 > 只读镜像里那条提示来自 `static/app.js` 的 `MIRROR` 常量 —— 它现在指向 `https://jianpu-db.org/`。
 
+**分享卡片（og:image）按"谁在服务这个页面"写**：cf 那份是 `https://jianpu-db.org/static/og.png`，
+gh 那份在构建时被改成 `https://jianpu-db.github.io/static/og.png`（见 `tools/build_dist.mjs` 里 gh 分支）。
+原因：域名在 "zone 绑好 + `wrangler deploy`" 之前取不到，那段时间贴镜像链接就是**无图卡片**。
+`canonical` / `og:url` **始终指正式域名**（那是"哪一份才是正本"的表态，镜像不抢）。
+
 ## 一、把域名接上（一次性，账号侧）
 
 1. **把 `jianpu-db.org` 加进 Cloudflare**：面板 → Add a site → 填 `jianpu-db.org` → 选 Free 计划

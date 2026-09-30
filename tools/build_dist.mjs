@@ -172,6 +172,19 @@ if (TARGET === 'cf') {
   const flags = injectFlags();
   for (const f of flags) console.log(`  index.html 内联开关           ${f}`);
   n += flags.length ? 1 : 0;
+  // ⚠ 分享卡片的图片改成**本镜像自己的地址**（2026-09-30 实测想到的）: `index.html` 里写的
+  //   `og:image` 是正式域名 `https://jianpu-db.org/static/og.png`，可域名在"zone 绑好 + wrangler
+  //   deploy"之前**取不到** —— 那段时间把镜像链接贴到群里就是**无图卡片**。
+  //   canonical / og:url **仍然指正式域名**（那是"哪一份才是正本"的表态，镜像不该抢），
+  //   只有图片这一处按"谁在服务这个页面"来写。
+  {
+    const idx = join(DIST, 'index.html');
+    let html = readFileSync(idx, 'utf8');
+    const before = html;
+    html = html.split('https://jianpu-db.org/static/og.png')
+               .join('https://jianpu-db.github.io/static/og.png');
+    if (html !== before) { writeFileSync(idx, html); console.log('  og:image                      -> 镜像自身地址(域名没绑好也能有图)'); }
+  }
   // 404.html 必须在开关注入**之后**复制, 两份逐字节相同(自检会盯着这一条)
   copyFileSync(join(DIST, 'index.html'), join(DIST, '404.html'));
   writeFileSync(join(DIST, '.nojekyll'), '');

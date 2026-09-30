@@ -35,5 +35,22 @@
     "API_UPSTREAM": "",
     "IMG_UPSTREAM": ""
   },
+  // ═══ 自定义域名（2026-09-30 加：用户拿到 jianpu-db.org）═══
+  // 这是**正式站点**（有写回：投稿 / 补属性 / 补标签都在 Worker 上）；
+  // GitHub Pages 那份（jianpu-db.github.io）退成**只读镜像**，它页面上那条
+  // "只读镜像：投稿请到 …" 的链接会指向这个域名（见 static/app.js 的 MIRROR）。
+  //
+  // 前置条件（**账号侧**，代码改不了）：`jianpu-db.org` 这个 zone 必须在本 Cloudflare 账号里
+  //   —— 在 Cloudflare 面板 Add a site 加 `jianpu-db.org`（Free 计划即可），
+  //   然后到域名注册商把 **NS 换成 Cloudflare 分配的那两个**（等生效，通常几分钟到几小时）。
+  //   zone 就位后跑一次 `npx wrangler deploy`，`custom_domain: true` 会自动建好
+  //   DNS 记录 + 证书（HTTPS 由 Cloudflare 管，无需手配 A 记录）。
+  //
+  // 两个都绑：apex 是主入口，www 也直接服务同一份（想改成 301 到 apex，用 Cloudflare 的
+  //   Rules → Redirect Rules 加一条，不必改代码）。
+  "routes": [
+    { "pattern": "jianpu-db.org", "custom_domain": true },
+    { "pattern": "www.jianpu-db.org", "custom_domain": true }
+  ],
   "observability": { "enabled": true }
 }

@@ -830,12 +830,15 @@ var API = window.JIANPU_API || (location.protocol + '//' + location.host);   // 
 // 纯静态托管(如 GitHub Pages 镜像)没有写回服务: 构建时注入 window.JIANPU_READONLY=true。
 // 读路径(检索/卡片/谱页)本来全在浏览器里跑, 一点不受影响; 只有"投稿/补收录/补标签"要给句人话。
 var READONLY = !!window.JIANPU_READONLY;
-var MIRROR = 'https://jianpu-web.pages.dev/';       // 有写回的那份(Cloudflare); 只读镜像里指给大家
+// 有写回的那份: **正式站点**（Cloudflare Worker, 2026-09-30 起绑了自定义域名 jianpu-db.org）。
+// GitHub Pages 这份是**只读镜像**，遇到"投稿/补收录/补标签"就把人指到这里。
+// （早先指向 jianpu-web.pages.dev；那个地址仍然可用，只是不再是门面。）
+var MIRROR = 'https://jianpu-db.org/';
 
 function readonlyInto(el) {
   el.className = (el.classList && el.classList.contains('al-msg')) ? 'al-msg err' : 'status err';
   el.innerHTML = '只读镜像：投稿请到 ' +
-    '<a href="' + MIRROR + '" target="_blank" rel="noopener">jianpu-web.pages.dev</a>。';
+    '<a href="' + MIRROR + '" target="_blank" rel="noopener">jianpu-db.org</a>。';
 }
 
 var LAST = '', LASTFILE = '';   // 供「投稿」表单: 曲名 + 刚查的那一份曲谱文件
@@ -886,7 +889,7 @@ $('sform').addEventListener('submit', function (e) { e.preventDefault(); submit(
 if (READONLY) {           // 表单还在, 但先把话说清楚 —— 免得人填完才发现写不进去
   $('sform').insertAdjacentHTML('beforebegin',
     '<p class="lead" id="ro-note">⚠ 只读镜像：查歌、谱页可用；投稿请到 ' +
-    '<a href="' + MIRROR + '" target="_blank" rel="noopener">jianpu-web.pages.dev</a>。</p>');
+    '<a href="' + MIRROR + '" target="_blank" rel="noopener">jianpu-db.org</a>。</p>');
 }
 $('sfill').addEventListener('click', function () {
   if (LAST) { $('stitle').value = LAST; }

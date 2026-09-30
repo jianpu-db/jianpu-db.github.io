@@ -13,7 +13,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { injectSongMeta } = await import('file://' + join(ROOT, 'worker', 'index.js').replace(/\\/g, '/'));
+const { injectSongMeta, httpsRedirectUrl } = await import(
+  'file://' + join(ROOT, 'worker', 'index.js').replace(/\\/g, '/'));
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fail++; };
@@ -63,6 +64,16 @@ ok(noOrigin.match(/<link rel="canonical" href="([^"]*)"/)[1] === HTML.match(/<li
    '不给 origin 时 canonical 原样不动（不写坏）');
 ok(noOrigin.match(/<meta property="og:url" content="([^"]*)"/)[1] === HTML.match(/<meta property="og:url" content="([^"]*)"/)[1],
    '不给 origin 时 og:url 原样不动');
+
+// ⑤ http -> https 的 301（面板开关默认不一定开，所以写在代码里）
+ok(httpsRedirectUrl(new URL('http://jianpu-db.org/')) === 'https://jianpu-db.org/',
+   'http 首页 -> https 首页');
+ok(httpsRedirectUrl(new URL('http://jianpu-db.org/s/x-1?q=5653212')) === 'https://jianpu-db.org/s/x-1?q=5653212',
+   '深链与查询串原样保留（分享的 ?q= 不会丢）');
+ok(httpsRedirectUrl(new URL('http://www.jianpu-db.org/sitemap.xml')) === 'https://www.jianpu-db.org/sitemap.xml',
+   'www 也一起跳');
+ok(httpsRedirectUrl(new URL('https://jianpu-db.org/')) === '', '本来就是 https -> 不跳（不产生循环）');
+ok(httpsRedirectUrl(null) === '', 'url 为空 -> 不跳');
 
 console.log(`\n${fail === 0 ? '通过' : '失败 ' + fail + ' 项'}`);
 process.exitCode = fail ? 1 : 0;

@@ -28,6 +28,16 @@ const MIME = {
   '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
 };
 
+// ⚠ 这两行被我自己弄丢过一次（2026-09-30 上线当天）：加 `httpsRedirectUrl` 的那次编辑把
+//   `let OG_CACHE` 那行**替换掉了**，于是 `OG_CACHE = 'pending'` 变成给未声明变量赋值 —— ESM 严格模式下
+//   抛 ReferenceError。后果很隐蔽: `ogIndex()` 里那句判断在 `try` **外面**，所以异常不是被它自己吞掉，
+//   而是冒到调用方 —— `serveSongPage` 有 try/catch, **页面照样打开、只是标题退回通用的**；
+//   `/api/health` 没包 try，直接 500。表现就是"站点好的，功能没了"。
+//   教训: `let`/`const` 声明别写在会被整段替换的位置；`/api/health` 里那个 `og` 计数就是为了让这种
+//   "悄悄退化"以后一眼看得出来（`og: 0` 或 500 都说明注入没在干活）。
+let OG_CACHE = null;                    // { id: [title, artist, notes] } | 'pending' | null
+let OG_ERR = '';                        // 取 og.json 失败的原因（从 /api/health 的 ogErr 读）
+
 // ══════════════════════════════════════════════════════════════════════════════
 // 「每谱一页」的分享/收录元数据（2026-09-30 加正式域名时一起做的）
 //
@@ -42,7 +52,20 @@ const MIME = {
 //   ③ 注入走**函数式替换**（不是字符串拼 `$1`）—— 曲名里出现 `$&` 之类时不会被当成替换模式。
 // ══════════════════════════════════════════════════════════════════════════════
 
-let OG_CACHE = null;                    // { id: [title, artist, notes] } | 'pending' | null
+/** `http://` 的请求 -> 该 301 到的 `https://` 地址；本来就是 https 就返回空串。
+ *
+ * 为什么在代码里做而不是开面板开关: 站点绑的是自定义域名，Cloudflare 的 "Always Use HTTPS"
+ * 默认**不一定**开着（2026-09-30 实测 `http://jianpu-db.org/` 直接 200 返回）。放在这里的好处是
+ * ——跟别的行为一样进仓库、有测试、部署即生效，不依赖谁记得去点那个开关。
+ * 只动协议，路径/查询串原样保留（分享出去的 `?q=…` 深链不会丢参数）。
+ */
+export function httpsRedirectUrl(url) {
+  if (!url || url.protocol !== 'http:') return '';
+  const u = new URL(url.toString());
+  u.protocol = 'https:';
+  return u.toString();
+}
+
 
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -75,17 +98,23 @@ export function injectSongMeta(html, meta, opts) {
   return out;
 }
 
-/** 取 `data/og.json`（只取一次）。取不到就当没有 —— 别让谱页因此挂掉。 */
-async function ogIndex(env) {
+/** 取 `data/og.json`（只取一次）。取不到就当没有 —— 别让谱页因此挂掉。
+ *
+ * ⚠ 用**同一个 origin** 去取（`url.origin`），不要图省事写成 `https://assets.local/...` 那种假域名：
+ *   2026-09-30 上线实测踩到 —— 假域名那次 `env.ASSETS.fetch` 拿不到东西，于是 `/s/<id>` 悄悄退回
+ *   通用标题（异常被吞掉了，表面上"站点是好的"）。同源地址与主页那次取 `/index.html` 一样稳。
+ */
+async function ogIndex(env, origin) {
   if (OG_CACHE && OG_CACHE !== 'pending') return OG_CACHE;
   if (OG_CACHE === 'pending') return null;
   OG_CACHE = 'pending';
   try {
-    const r = await env.ASSETS.fetch(new Request('https://assets.local/data/og.json'));
-    if (!r.ok) { OG_CACHE = null; return null; }
+    const r = await env.ASSETS.fetch(new URL('/data/og.json', origin).toString());
+    if (!r.ok) { OG_ERR = 'HTTP ' + r.status; OG_CACHE = null; return null; }
     OG_CACHE = await r.json();
     return OG_CACHE;
-  } catch {
+  } catch (e) {
+    OG_ERR = String((e && e.message) || e);      // 诊断用: 从 /api/health 的 ogErr 读
     OG_CACHE = null;
     return null;
   }
@@ -98,7 +127,7 @@ async function serveSongPage(request, env, url) {
   const res = await env.ASSETS.fetch(new URL('/index.html', url.origin).toString());
   try {
     const id = decodeURIComponent(url.pathname.replace(/^\/s\/?/, '').replace(/\/$/, ''));
-    const idx = await ogIndex(env);
+    const idx = await ogIndex(env, url.origin);
     const meta = idx && id ? idx[id] : null;
     if (!meta) return res;
     const html = injectSongMeta(await res.text(), meta, { origin: url.origin, id });
@@ -114,6 +143,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+    // 明文 http 一律 301 到 https（见 httpsRedirectUrl 的说明）
+    const toHttps = httpsRedirectUrl(url);
+    if (toHttps) return Response.redirect(toHttps, 301);
     if (path.startsWith(IMG_PREFIX)) {
       return serveImage(request, env, url);
     }
@@ -122,9 +154,13 @@ export default {
       // `Content-Type: application/json` 属于非简单请求, 没有这一段浏览器直接就拦了 —— 连不上本机。
       if (request.method === 'OPTIONS') return preflight();
       if (path === '/api/health') {
+        // `og` = 「每谱一页」那份分享卡索引（`data/og.json`）的条数。加它是因为 2026-09-30 上线时
+        // 踩过一次"谱页悄悄退回通用标题"——异常被吞了，从外面看不出来；有这个数字一条 curl 就够。
+        const og = await ogIndex(env, url.origin);
         return json({ ok: true, deploy: 'cloudflare-worker',
                       images: env.IMAGES ? 'r2' : (env.IMG_UPSTREAM ? 'proxy' : 'none'),
-                      api: !!env.API_UPSTREAM, upstream: env.API_UPSTREAM || null });
+                      api: !!env.API_UPSTREAM, upstream: env.API_UPSTREAM || null,
+                      og: og ? Object.keys(og).length : 0, ogErr: OG_ERR });
       }
       return proxyApi(request, env, url);
     }

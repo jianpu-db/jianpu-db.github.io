@@ -11,7 +11,20 @@
     "directory": "./dist",
     "binding": "ASSETS",
     // /s/<id> 这类前端路由: 找不到文件就回 index.html（单页应用）
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // ⚠ **2026-09-30 上线实测踩到**: 不写这一行时，`/s/<id>` 这种"没有对应文件、靠回退到
+    //   index.html"的请求**在路由层就被资源系统接走了**（单一页应用回退），Worker 根本不会被调用 ——
+    //   于是"给每谱一页注入这一首的标题"白做（页面照样打得开，所以从外面看不出问题；
+    //   `/api/health`、`/img/*` 因为不是资源，反而是正常的）。
+    //   `run_worker_first` 指定哪些路径**必须先过 Worker**。
+    //
+    //   为什么是 `true`（全部先过 Worker）而不是只列 `/s/*`、`/api/*`、`/img/*`：
+    //   文里那份 http→https 的 301 也得对所有路径生效 —— 只列三条时实测 `/`、`/sitemap.xml`
+    //   这类**真资源**仍是明文 200（资源层直接回了，Worker 没被叫到），出现"一部分跳、一部分不跳"
+    //   的怪状态。全过 Worker 的代价只是每个资源请求多一次 Worker 调用（免费额度 10 万/天，
+    //   本站这点量完全够），换来的是**行为与仓库里的代码一致**，不依赖谁记得去面板点
+    //   "Always Use HTTPS" 那个开关。
+    "run_worker_first": true
   },
   // ⚠ 2026-09-24: R2 绑定**先注释掉** —— 账号还没开通 R2, 桶建不出来, 而 `wrangler deploy`
   //   会在绑定校验那步直接失败(code 10085 "R2 bucket 'jianpu-images' not found"),

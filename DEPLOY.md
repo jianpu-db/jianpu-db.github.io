@@ -40,6 +40,23 @@ gh 那份在构建时被改成 `https://jianpu-db.github.io/static/og.png`（见
    **不需要**手配 A 记录、也不需要 CNAME 文件：apex 由 Cloudflare 代理，HTTPS 由 Cloudflare 签。
    （想让 `www` 301 到 apex：面板 → Rules → Redirect Rules 加一条即可，不用改代码。）
 
+## 一·补、上线当天踩到的两个坑（都写在代码注释里了，这里给结论）
+
+1. **`assets.run_worker_first` 必须设**（`wrangler.jsonc`）。不设时，`/s/<id>` 这种"没有对应文件、
+   靠 `not_found_handling: single-page-application` 回退到 index.html"的请求**在路由层就被资源系统
+   接走了**，Worker 根本不被调用 —— "每谱一页注入标题"白做，而**页面照样打开**（所以从外面看不出）。
+   现在设成 `true`：既让 `/s/*` 真的过 Worker，也让 http→https 的 301 对所有路径一致生效
+   （只列 `/s/*` 时实测 `/`、`/sitemap.xml` 这类真资源仍是明文 200，因为资源层直接回了，
+   出现"一部分跳、一部分不跳"）。
+2. **`/api/health` 现在带 `og` 与 `ogErr`**：`og` 是 `data/og.json` 的条数（正常 = 语料首数，
+   实测 `11141`），`ogErr` 是取不到时的原因。上线当天正是因为把 `let OG_CACHE` 那行声明**误删**，
+   注入悄悄退化（异常被 `serveSongPage` 的 try/catch 吞掉），而这条 curl 一秒就能看出来。
+
+```bash
+curl -s https://jianpu-db.org/api/health
+# {"ok":true,"deploy":"cloudflare-worker",...,"og":11141,"ogErr":""}
+```
+
 ## 二、（可选）原图与投稿后端
 
 * **原图走 R2**（否则 Worker 会去 `IMG_UPSTREAM` 反代，走你家上行）：

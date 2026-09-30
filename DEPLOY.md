@@ -57,6 +57,39 @@ curl -s https://jianpu-db.org/api/health
 # {"ok":true,"deploy":"cloudflare-worker",...,"og":11141,"ogErr":""}
 ```
 
+## 一·补二、投稿后端接上了（2026-09-30）：隧道 + 两个 secret
+
+本机服务**故意只听 127.0.0.1**（它能写盘 + git commit）。给域名用时走隧道（出向连接，不需要公网 IP、
+不需要端口映射，自带 HTTPS）：
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8770        # 拿一个 https://xxx.trycloudflare.com
+npx wrangler secret put API_UPSTREAM                  # 填上面那个地址
+npx wrangler secret put API_TOKEN                     # 与本机 JPSUBMIT_TOKEN 同值
+```
+
+**坑（当天踩到）**：`API_UPSTREAM` / `IMG_UPSTREAM` 原本写在 `wrangler.jsonc` 的 `"vars"` 里，
+而 `vars` 与 `secret` **共用"绑定名"命名空间** —— 再 `secret put` 同名就会报
+`Binding name 'API_UPSTREAM' already in use. [code: 10053]`。现在这两个值**只走 secret**（本来也该是），
+`vars` 整块已从配置里去掉；代码对"没设"是安全的。
+
+**实测全链路**（域名 → Worker → 隧道 → 本机 → 语料）：
+
+```bash
+curl -s https://jianpu-db.org/api/health
+# {"ok":true,...,"api":true,"upstream":"https://…trycloudflare.com","og":11141}
+curl -s -X POST https://jianpu-db.org/api/submit -H 'Content-Type: application/json' \
+     --data '{"kind":"tags","file":"101.txt","tags":["毛不易"]}'
+# {"ok":true,"state":"已写入","committed":true,"tags":["毛不易"],"refresh":true,"refresh_msg":"已开始重建(约 2 分钟)"}
+```
+
+`scores/101.txt` 写入 `usertag=毛不易`、本机 `git commit`（`tags: 101.txt —— 人工补标签(毛不易)`）、
+`feedback/20260930-171430-tags-101.json` 留档、并触发了索引重建。
+隧道地址与 token 存在 `jianpu2/train-work/tunnel_secret.txt`（该目录 gitignore）。
+
+> 快速隧道（`*.trycloudflare.com`）**每次重启换地址**，正式用建议命名隧道绑 `api.jianpu-db.org`
+> （需要先跑一次 `cloudflared tunnel login` 点授权）。
+
 ## 二、（可选）原图与投稿后端
 
 * **原图走 R2**（否则 Worker 会去 `IMG_UPSTREAM` 反代，走你家上行）：

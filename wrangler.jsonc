@@ -44,10 +44,15 @@
   //   npx wrangler secret put API_UPSTREAM
   //   npx wrangler secret put API_TOKEN        # 与本机 JPSUBMIT_TOKEN 同一个值
   // 不配也能跑: 检索/卡片/谱页/原图全部在边缘, 只有"投稿"会回一句"没有投稿后端"。
-  "vars": {
-    "API_UPSTREAM": "",
-    "IMG_UPSTREAM": ""
-  },
+  // ⚠ **这两个上游地址不能写在这里**（2026-09-30 上线时踩到）: `vars` 与 `secret` 是同一套"绑定名"，
+  //   既在 `vars` 里声明、又想 `wrangler secret put` 设同名 secret，会直接报
+  //   `Binding name 'API_UPSTREAM' already in use. [code: 10053]`。
+  //   而这两个值本来就该是 secret（隧道地址会变；token 是口令），所以现在**只用 secret**：
+  //     npx wrangler secret put API_UPSTREAM     # 例如 https://xxx.trycloudflare.com
+  //     npx wrangler secret put API_TOKEN        # 与本机 JPSUBMIT_TOKEN 同值
+  //     npx wrangler secret put IMG_UPSTREAM     # 没开 R2 时，原图反代到哪儿（可选）
+  //   代码里对"没设"是安全的：`(env.API_UPSTREAM || '')`、`env.IMAGES ? … : …`。
+  //
   // ═══ 自定义域名（2026-09-30 加：用户拿到 jianpu-db.org）═══
   // 这是**正式站点**（有写回：投稿 / 补属性 / 补标签都在 Worker 上）；
   // GitHub Pages 那份（jianpu-db.github.io）退成**只读镜像**，它页面上那条

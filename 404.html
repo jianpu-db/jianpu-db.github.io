@@ -4,6 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jianpu-db | 通过简谱旋律查歌</title>
+<!-- 分享卡片与爬虫（2026-09-30 有正式域名 jianpu-db.org 之后加）。
+     ⚠ 这里的地址**必须是绝对 URL**（og:image / canonical 用相对路径社交平台与爬虫都读不到）；
+     `og.png` 特意不参与内容哈希改名（见 tools/build_dist.mjs），不然这个地址会随构建乱变。
+     `canonical` 指向正式域名: GitHub Pages 那份是**镜像**，别让搜索引擎把它当两份内容。 -->
+<meta name="description" content="简谱旋律查歌：只哼开头几个音（如 5 5 6 5 3 2 1），从 1 万多首简谱里把这首歌找出来。检索完全在你的浏览器里跑，不上传、不留痕。">
+<link rel="canonical" href="https://jianpu-db.org/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="jianpu-db">
+<meta property="og:title" content="jianpu-db | 通过简谱旋律查歌">
+<meta property="og:description" content="哼开头几个音，把简谱找出来。11,000+ 首、200 万+ 音符，检索全在浏览器里跑。">
+<meta property="og:url" content="https://jianpu-db.org/">
+<meta property="og:image" content="https://jianpu-db.org/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="jianpu-db | 通过简谱旋律查歌">
+<meta name="twitter:description" content="哼开头几个音，把简谱找出来。11,000+ 首、200 万+ 音符。">
+<meta name="twitter:image" content="https://jianpu-db.org/static/og.png">
+<meta name="theme-color" content="#0b62c4">
+<!-- 站标: 内联 SVG(数字 123 就是简谱的样子), 免得再加一个请求 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b62c4'/%3E%3Ctext x='32' y='45' font-family='Helvetica,Arial' font-size='34' font-weight='bold' fill='white' text-anchor='middle'%3E123%3C/text%3E%3C/svg%3E">
 <!-- ⚠ 这一小段必须留在**最前面**, 而且必须是内联的(不能搬进 app.js)。
      为什么: 谱页的地址是 `/s/<id>`, 在这个地址上相对路径 `./static/app.dc63b9a7.js` 会被浏览器解析成
      `/s/static/app.js`(404) -> 深链/刷新整片白屏(2026-09-24 实测)。这里按"文档地址 = 应用根 +

@@ -140,6 +140,8 @@ def main():
     ap.add_argument("--no-images", action="store_true", help="不重扫原图索引(只重建检索索引)")
     ap.add_argument("--img-base", default="/img/", help="原图 URL 前缀(换 CDN/静态站时改这里)")
     ap.add_argument("--scores", default="", help="曲谱目录(默认 <data 所在目录>/scores); 用来取'原谱原文' verbatim")
+    ap.add_argument("--site", default="https://jianpu-db.org",
+                    help="站点根 URL —— 用来写 robots.txt/sitemap.xml 里的绝对地址(2026-09-30 起正式域名)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -324,6 +326,27 @@ def main():
     print(f"  音符 {notes:,} · 含变音记号的 {stats['with_accidental']} 首 · 带原谱 {stats['with_raw']} 首")
     print(f"  原图 {with_images} 首 / {image_pages} 页(全库扫出 {stats['image_sources']} 个 source 的图)")
     print(f"  来源 {stats['sources']}")
+
+    # ── 顺带生成爬虫要的两个根文件（2026-09-30 有正式域名 jianpu-db.org 之后加）──
+    # 为什么放在这条流水线里: 它们的内容**随语料变**（每首歌一个 `/s/<id>`），
+    # 放在"语料 -> 前端索引"这一步生成，才不会变成又一个"文档里的旧数字"。
+    # `robots.txt` 与 `sitemap.xml` 都落在**站点根**（WF 部署时由 build_dist.mjs 拷进 dist/）。
+    site = (a.site or "https://jianpu-db.org").rstrip("/")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 站点仓库根
+    with io.open(os.path.join(root, "robots.txt"), "w", encoding="utf-8", newline="\n") as g:
+        g.write("User-agent: *\nAllow: /\n\n"
+                "# 每首谱一页(深链): 大量页面靠 sitemap 才被爬到\n"
+                f"Sitemap: {site}/sitemap.xml\n")
+    ids = sorted({(r.get("id") or r.get("s") or "") for r in rows} - {""})
+    with io.open(os.path.join(root, "sitemap.xml"), "w", encoding="utf-8", newline="\n") as g:
+        g.write('<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n')
+        g.write(f"  <url><loc>{site}/</loc><changefreq>daily</changefreq>"
+                "<priority>1.0</priority></url>\n")
+        for i in ids:
+            g.write(f"  <url><loc>{site}/s/{i}</loc></url>\n")
+        g.write("</urlset>\n")
+    print(f"  爬虫文件: robots.txt + sitemap.xml（{len(ids)} 个谱页深链, 站点 {site}）")
 
 
 if __name__ == "__main__":

@@ -143,6 +143,12 @@ console.log(`拼 ${DIST.slice(ROOT.length + 1) || DIST}/  (target=${TARGET}${TAR
 put(join(ROOT, 'static', 'index.html'), 'index.html');          // 入口必须在资源根上
 hashedStatic();
 for (const f of DATA_FILES) put(join(ROOT, 'data', f), `data/${f}`);
+// 不带哈希的静态资源（2026-09-30 加）: 分享卡片图 —— OG 标签里的地址必须**稳定**，
+// 所以它不能参与内容哈希改名（social 平台会长期缓存这个 URL）。
+put(join(ROOT, 'static', 'og.png'), 'static/og.png');
+// 爬虫要的两个根文件（`sitemap.xml` 由 tools/build_web_data.py 随语料一起生成）:
+put(join(ROOT, 'robots.txt'), 'robots.txt');
+put(join(ROOT, 'sitemap.xml'), 'sitemap.xml');
 
 if (TARGET === 'cf') {
   // 缓存策略: 交给 Cloudflare 的 _headers(assets 支持)。数据每次 push 都重新部署,

@@ -52,7 +52,10 @@ MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=ut
         ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
         ".jsonl": "application/x-ndjson; charset=utf-8", ".gz": "application/gzip",
         ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon",
-        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+        # 爬虫/平台校验文件（2026-09-30 加 robots.txt/sitemap.xml 时补）—— 不给类型会变
+        # `application/octet-stream`，本地自检当场就报红了（线上由托管方按扩展名给，是对的）。
+        ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8"}
 
 
 def image_roots():
@@ -471,6 +474,13 @@ def resolve(path):
     if path == "/s" or path.startswith("/s/"):
         return os.path.join(ROOT, "static", "index.html")
     rel = path.lstrip("/")
+    # 根上的"给爬虫/给平台校验"的文件（`robots.txt` / `sitemap.xml` / `BingSiteAuth.xml` …）：
+    # 先看**仓库根**有没有这个文件。不这么写就会被下面那句当成 `static/robots.txt` -> 本地 404，
+    # 而线上(GitHub Pages / Cloudflare 都把根目录当资源根)明明是好的 —— 本地与线上不一致最难查。
+    if rel and "/" not in rel:
+        cand = os.path.normpath(os.path.join(ROOT, rel))
+        if cand.startswith(ROOT) and os.path.isfile(cand):
+            return cand
     if not rel.startswith(("static/", "data/")):
         rel = os.path.join("static", rel)
     full = os.path.normpath(os.path.join(ROOT, rel))

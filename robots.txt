@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# 每首谱一页(深链): 大量页面靠 sitemap 才被爬到
+Sitemap: https://jianpu-db.org/sitemap.xml

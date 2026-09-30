@@ -53,6 +53,25 @@ async function main() {
   const idx = buildIndex(text);
   ok(idx && idx.songs && idx.songs.length === st.songs, `buildIndex 成功: ${idx.songs.length} 首`);
 
+  // ②b 爬虫/分享要的几个根文件（2026-09-30 加正式域名 jianpu-db.org 时一起加的）
+  // 为什么要在这儿盯: 它们是**根目录**文件，本地服务早期会把 `/robots.txt` 当成 `static/robots.txt`
+  // 而 404 —— 本地与线上不一致最难查。`og.png` 还必须是**不带内容哈希**的稳定地址。
+  for (const [p, kind] of [['/robots.txt', 'text/plain'], ['/sitemap.xml', 'xml'],
+                           ['/static/og.png', 'image/png']]) {
+    const z = await fetch(BASE + p);
+    const ct = z.headers.get('content-type') || '';
+    const want = kind === 'xml' ? /xml/ : new RegExp(kind.replace('/', '\\/'));
+    ok(z.ok && want.test(ct), `${p} HTTP ${z.status} ${ct}`);
+  }
+  {
+    const sm = await (await fetch(BASE + '/sitemap.xml')).text();
+    const n = (sm.match(/<loc>/g) || []).length;
+    ok(n === st.songs + 1, `sitemap 里 ${n} 条 == 语料 ${st.songs} 首 + 首页`);
+    ok(sm.includes('https://jianpu-db.org/'), 'sitemap 用的是正式域名(不是 github.io)');
+    const rb = await (await fetch(BASE + '/robots.txt')).text();
+    ok(/Sitemap:\s*https:\/\/jianpu-db\.org\/sitemap\.xml/.test(rb), 'robots.txt 指向正式域名的 sitemap');
+  }
+
   // ③ 用前端代码查"人耳那句"与"原谱那句"
   // 63731232: 段落加权后第一是 U.N.オーエンは彼女なのか？(命中在副歌), 神々 那处在发狂钢琴段
   //

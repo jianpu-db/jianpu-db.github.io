@@ -72,6 +72,23 @@ async function main() {
     ok(/Sitemap:\s*https:\/\/jianpu-db\.org\/sitemap\.xml/.test(rb), 'robots.txt 指向正式域名的 sitemap');
   }
 
+  // ②c 「每谱一页」给爬虫看到的 head（本地服务与边缘 Worker **各实现一遍**，这里盯本地那份；
+  //     JS 那份由 tools/check_og_meta.mjs 离线测）。爬虫不跑 JS —— 不注入的话 1.1 万个谱页
+  //     在它们眼里是**同一份 HTML**。
+  {
+    // ⚠ 用 `title`（buildIndex 把 `t` 改名成 `title` 了，`id` 保留）—— 第一版写成 `s.t` 直接
+    //   TypeError 崩掉，把后面所有检查都带走了。
+    const one = idx.songs.find((s) => s.id && s.title && String(s.title).length >= 2);
+    const pr = await fetch(BASE + '/s/' + encodeURIComponent(one.id));
+    const ph = await pr.text();
+    const frag = String(one.title).slice(0, 2);
+    ok(pr.ok && ph.includes('<title>') && ph.includes(frag),
+       `/s/${one.id} 的 <title> 带你查的这首（片段 "${frag}"）`);
+    ok(ph.includes('<body') && ph.length > 1000, '谱页 HTML 完整（注入没把它弄坏）');
+    const canon = (ph.match(/<link rel="canonical" href="([^"]*)"/) || [])[1] || '';
+    ok(canon.endsWith('/s/' + encodeURIComponent(one.id)), `canonical 指向这一页: ${canon}`);
+  }
+
   // ③ 用前端代码查"人耳那句"与"原谱那句"
   // 63731232: 段落加权后第一是 U.N.オーエンは彼女なのか？(命中在副歌), 神々 那处在发狂钢琴段
   //

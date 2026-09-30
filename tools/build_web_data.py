@@ -348,6 +348,24 @@ def main():
         g.write("</urlset>\n")
     print(f"  爬虫文件: robots.txt + sitemap.xml（{len(ids)} 个谱页深链, 站点 {site}）")
 
+    # ── 「每谱一页」的分享卡索引（2026-09-30 加）──
+    # 前端是 SPA，**爬虫不跑 JS** ⇒ 没有这一步，sitemap 里那 1.1 万个 `/s/<id>` 在爬虫眼里是
+    # **同一份 HTML**（同一个标题、同一段描述），等于只索引一页；社交平台分享也全是同一张卡。
+    # 有了它，Worker（和本机 app/server.py）能在**边缘/本地**把曲名、歌手、音符数写进
+    # `<title>` 与 og:* —— 每个谱页各有标题，抓到的内容也不再千篇一律。
+    # 只放三样东西(不塞全文): 曲名 / 首位歌手 / 音符数。
+    og = {}
+    for r in rows:
+        i = r.get("id") or r.get("s") or ""
+        if not i:
+            continue
+        ar = [str(x) for x in (r.get("artist") or []) if str(x).strip()]
+        og[i] = [r.get("t") or "", (ar[0] if ar else ""), int(r.get("n") or 0)]
+    with io.open(os.path.join(a.out, "og.json"), "w", encoding="utf-8", newline="\n") as g:
+        g.write(json.dumps(og, ensure_ascii=False, separators=(",", ":")))
+    print(f"  分享卡索引: data/og.json（{len(og)} 首 · "
+          f"{os.path.getsize(os.path.join(a.out, 'og.json'))/1e6:.2f} MB 未压缩）")
+
 
 if __name__ == "__main__":
     main()

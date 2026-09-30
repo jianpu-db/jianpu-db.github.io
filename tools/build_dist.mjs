@@ -58,7 +58,9 @@ const STATIC_FILES = ['jptok.js', 'search.js', 'style.css', 'app.js'];
 // 带哈希后长缓存就安全了: 内容一变 URL 就变。JS 里 `./search.js` 这类 import 也要一起改。
 // ⚠ **不打包 images.jsonl.gz**（省 0.5MB）: 2026-09-24 用户口径 —— 前端不要"原图"那一栏,
 //   既不转存扫描件也不外链图片; 原站页面地址在「出处」/「收录页」里。所以线上不需要图索引。
-const DATA_FILES = ['songs.jsonl.gz', 'stats.json'];
+// `og.json` = 「每谱一页」的分享卡索引（id -> [曲名, 歌手, 音符数]）: 边缘 Worker 取它来给
+// `/s/<id>` 注入 `<title>`/og:*（爬虫不跑 JS，没有它 1.1 万个谱页在爬虫眼里是同一份 HTML）。
+const DATA_FILES = ['songs.jsonl.gz', 'stats.json', 'og.json'];
 
 rmSync(DIST, { recursive: true, force: true });
 let n = 0, bytes = 0;

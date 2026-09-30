@@ -28,6 +28,88 @@ const MIME = {
   '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 「每谱一页」的分享/收录元数据（2026-09-30 加正式域名时一起做的）
+//
+// 为什么必须在这儿做: 前端是 SPA —— **爬虫不跑 JS**。没有这一段，sitemap 里 1.1 万个
+// `/s/<id>` 在爬虫眼里是**同一份 HTML**（同一个 <title>、同一段 description），
+// 于是"1.1 万个页面"只等于 1 个可索引页；分享到群里也永远是同一张卡。
+// 数据来自构建期生成的 `data/og.json`（`id -> [曲名, 歌手, 音符数]`，见 tools/build_web_data.py）。
+//
+// 三条纪律:
+//   ① **任何异常都退回原始 HTML** —— 这段是锦上添花，绝不能因为它让谱页打不开；
+//   ② `og.json` 只在模块作用域缓存一次（isolate 活着就一直用；部署后自然刷新）；
+//   ③ 注入走**函数式替换**（不是字符串拼 `$1`）—— 曲名里出现 `$&` 之类时不会被当成替换模式。
+// ══════════════════════════════════════════════════════════════════════════════
+
+let OG_CACHE = null;                    // { id: [title, artist, notes] } | 'pending' | null
+
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/** 把一首歌的标题/描述写进 HTML 的 head（纯函数，便于离线测试）。 */
+export function injectSongMeta(html, meta, opts) {
+  if (!html || !meta) return html;
+  const [title, artist, notes] = meta;
+  if (!title) return html;
+  const o = opts || {};
+  const label = artist ? `${title}（${artist}）` : title;
+  const pageTitle = `${label} · 简谱 | jianpu-db`;
+  const desc = `${label}的简谱：${notes} 个音符。哼开头几个音就能把这首歌的谱找出来 —— jianpu-db。`;
+  const url = o.origin && o.id ? `${o.origin}/s/${encodeURIComponent(o.id)}` : '';
+  const pairs = [
+    [/<title>[^<]*<\/title>/, () => `<title>${esc(pageTitle)}</title>`],
+    [/(<meta name="description" content=")[^"]*(")/, (m, a, b) => a + esc(desc) + b],
+    [/(<meta property="og:title" content=")[^"]*(")/, (m, a, b) => a + esc(pageTitle) + b],
+    [/(<meta property="og:description" content=")[^"]*(")/, (m, a, b) => a + esc(desc) + b],
+    [/(<meta name="twitter:title" content=")[^"]*(")/, (m, a, b) => a + esc(pageTitle) + b],
+    [/(<meta name="twitter:description" content=")[^"]*(")/, (m, a, b) => a + esc(desc) + b],
+  ];
+  if (url) {
+    pairs.push([/(<link rel="canonical" href=")[^"]*(")/, (m, a, b) => a + esc(url) + b]);
+    pairs.push([/(<meta property="og:url" content=")[^"]*(")/, (m, a, b) => a + esc(url) + b]);
+  }
+  let out = html;
+  for (const [re, fn] of pairs) out = out.replace(re, fn);
+  return out;
+}
+
+/** 取 `data/og.json`（只取一次）。取不到就当没有 —— 别让谱页因此挂掉。 */
+async function ogIndex(env) {
+  if (OG_CACHE && OG_CACHE !== 'pending') return OG_CACHE;
+  if (OG_CACHE === 'pending') return null;
+  OG_CACHE = 'pending';
+  try {
+    const r = await env.ASSETS.fetch(new Request('https://assets.local/data/og.json'));
+    if (!r.ok) { OG_CACHE = null; return null; }
+    OG_CACHE = await r.json();
+    return OG_CACHE;
+  } catch {
+    OG_CACHE = null;
+    return null;
+  }
+}
+
+/** `/s/<id>`: 拿静态的 index.html，按 id 把标题/描述换掉。 */
+async function serveSongPage(request, env, url) {
+  // 取首页那份 HTML。⚠ 用**字符串 URL** 发 GET（不要 `new Request(url, request)` 那种把
+  // 原请求当 init 的写法 —— 会把方法/请求头一起带过去，POST 之类就变味了）。
+  const res = await env.ASSETS.fetch(new URL('/index.html', url.origin).toString());
+  try {
+    const id = decodeURIComponent(url.pathname.replace(/^\/s\/?/, '').replace(/\/$/, ''));
+    const idx = await ogIndex(env);
+    const meta = idx && id ? idx[id] : null;
+    if (!meta) return res;
+    const html = injectSongMeta(await res.text(), meta, { origin: url.origin, id });
+    const h = new Headers(res.headers);
+    h.delete('content-length');
+    return new Response(html, { status: res.status, headers: h });
+  } catch {
+    return res;                          // 见纪律 ①
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -45,6 +127,10 @@ export default {
                       api: !!env.API_UPSTREAM, upstream: env.API_UPSTREAM || null });
       }
       return proxyApi(request, env, url);
+    }
+    // 「每谱一页」: 深链要给爬虫/分享平台看到**这一首**的标题（SPA 自己会渲染页面内容）
+    if (path === '/s' || path.startsWith('/s/')) {
+      return serveSongPage(request, env, url);
     }
     return env.ASSETS.fetch(request);
   },

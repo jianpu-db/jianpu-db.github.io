@@ -33,7 +33,7 @@ import sys
 import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WS = os.path.dirname(ROOT)                     # 工作区根(images/ 与 images-prep/ 就在这下面)
@@ -487,9 +487,74 @@ def resolve(path):
     return full if full.startswith(ROOT) else None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 「每谱一页」的分享/收录元数据（2026-09-30 加正式域名 jianpu-db.org 时做的）
+#
+# 前端是 SPA，**爬虫不跑 JS** —— 不做这一步，1.1 万个 `/s/<id>` 在爬虫眼里是同一份 HTML。
+# 数据来自构建期生成的 `data/og.json`（`id -> [曲名, 歌手, 音符数]`，见 tools/build_web_data.py）。
+# 与边缘那份（`worker/index.js` 的 `injectSongMeta`）**逻辑逐条对应**，两边都要改，
+# 免得又出现"本地与线上不一致"（这个坑今晚踩过两次：/robots.txt 404、MIME 类型错）。
+# 纪律同边缘: **任何异常都退回原始 HTML**；注入用函数式替换（曲名里有 `\1` 也不怕）。
+# ══════════════════════════════════════════════════════════════════════════════
+_OG = None
+
+
+def og_meta(tune_id):
+    """`data/og.json` 里这一首的 [曲名, 歌手, 音符数]；取不到返回 None。"""
+    global _OG
+    if _OG is None:
+        try:
+            with io.open(os.path.join(ROOT, "data", "og.json"), encoding="utf-8") as f:
+                _OG = json.load(f)
+        except Exception:
+            _OG = {}
+    return _OG.get(tune_id) if tune_id else None
+
+
+def _esc(s):
+    return (str(s if s is not None else "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;"))
+
+
+def inject_song_meta(html, meta, origin, tune_id):
+    """把这一首的标题/描述写进 head。meta 为空/异常时原样返回。"""
+    if not html or not meta:
+        return html
+    title = meta[0] if len(meta) > 0 else ""
+    if not title:
+        return html
+    artist = meta[1] if len(meta) > 1 else ""
+    notes = meta[2] if len(meta) > 2 else ""
+    label = "%s（%s）" % (title, artist) if artist else title
+    page_title = "%s · 简谱 | jianpu-db" % label
+    desc = "%s的简谱：%s 个音符。哼开头几个音就能把这首歌的谱找出来 —— jianpu-db。" % (label, notes)
+    url = "%s/s/%s" % (origin.rstrip("/"), quote(str(tune_id), safe="")) if (origin and tune_id) else ""
+    # ⚠ **必须用函数式替换**（`re.sub(pattern, callable, ...)`），不能把用户文字拼进替换串：
+    #   曲名里只要有个 `\1` 就会变成"反向引用" -> `re.PatternError: invalid group reference`
+    #   （隔离测试 `tools/check_og_meta.py` 当场抓到；JS 侧一开始就用的是函数，所以没这个坑）。
+    #   顺带这也省掉了"转义要照顾 `\g<1>` 语法"的额外心智负担。
+    def rep2(val):
+        return lambda mm: mm.group(1) + val + mm.group(2)
+
+    pairs = [
+        (r"(<title>)[^<]*(</title>)", _esc(page_title)),
+        (r'(<meta name="description" content=")[^"]*(")', _esc(desc)),
+        (r'(<meta property="og:title" content=")[^"]*(")', _esc(page_title)),
+        (r'(<meta property="og:description" content=")[^"]*(")', _esc(desc)),
+        (r'(<meta name="twitter:title" content=")[^"]*(")', _esc(page_title)),
+        (r'(<meta name="twitter:description" content=")[^"]*(")', _esc(desc)),
+    ]
+    if url:
+        pairs.append((r'(<link rel="canonical" href=")[^"]*(")', _esc(url)))
+        pairs.append((r'(<meta property="og:url" content=")[^"]*(")', _esc(url)))
+    out = html
+    for pat, val in pairs:
+        out = re.sub(pat, rep2(val), out, count=1)
+    return out
+
+
 def resolve_img(rel):
     """`/img/…` 后的路径 -> 磁盘路径; 任何越界/可疑一律 None。
-
     路径是**相对工作区根**写的(如 `images-prep/qupu123-crawl/曲名__qupu123-1/001.jpg`),
     因为索引就是这么存的(见 build_image_index.py)。三道闸: 百分号解码后逐段检查(不许 .. / 空段 /
     反斜杠 / NUL) -> 扩展名白名单 -> 规范化后必须落在 IMG_ROOTS 之一里面。
@@ -614,6 +679,25 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             return
         ext = os.path.splitext(full)[1].lower()
+        # 「每谱一页」`/s/<id>`: 服务端发同一份 index.html，但**把这一首的标题写进 head**
+        # （爬虫不跑 JS；与边缘 Worker 的行为对齐，见 worker/index.js 的 injectSongMeta）。
+        if ext == ".html" and (path == "/s" or path.startswith("/s/")):
+            try:
+                with io.open(full, encoding="utf-8") as f:
+                    html = f.read()
+                tid = unquote(path[2:].lstrip("/").rstrip("/"))
+                origin = "http://" + (self.headers.get("Host") or "")
+                html = inject_song_meta(html, og_meta(tid), origin, tid)
+                body = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            except Exception:
+                pass                      # 见纪律: 出任何问题都退回原始文件
         self._send_file(full, MIME.get(ext, "application/octet-stream"))
 
 

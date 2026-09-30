@@ -71,6 +71,22 @@ gh 那份在构建时被改成 `https://jianpu-db.github.io/static/og.png`（见
   再由 `tools/build_web_data.py` 变成 `data/songs.jsonl.gz` 等（流水线收尾自动跑）。
 * **本地预览**：`py -3.13 app/server.py 8770`（只读镜像语义 + 可写回，端口 8770）。
 
+## 三·补、「每谱一页」的分享卡与收录（2026-09-30 已做）
+
+前端是 SPA，**爬虫不跑 JS** —— 不做这一步，`sitemap.xml` 里 1.1 万个 `/s/<id>` 抓到的都是同一份
+`<title>`，等于只有一个可索引页；分享到群里也永远是同一张卡。现在：
+
+* 构建期 `tools/build_web_data.py` 产出 `data/og.json`（`id -> [曲名, 歌手, 音符数]`）；
+* **边缘** `worker/index.js` 与 **本机** `app/server.py` 各一份注入逻辑（口径逐条对应）：
+  `/s/<id>` 返回的仍然是同一份 SPA 外壳，但 `<title>`/description/og:*/twitter:*/canonical
+  已换成**这一首**的；
+* 纪律：任何异常都退回原始 HTML；`og:image` 保持通用卡片不动（每首没有各自的图）。
+
+自检：`tools/check_og_meta.mjs`（18 项，离线测边缘那份纯函数）、`tools/check_og_meta.py`
+（16 项，盯本机那份）、`tools/check_live.mjs` 里 3 项端到端。**两份测试都抓到过真 bug**：
+Python 侧第一版把曲名拼进 `re.sub` 替换串（曲名含 `\1` 就报 invalid group reference）；
+live 检查里误用 `one.t`（`buildIndex` 已把它改名 `title`）导致整支检查崩掉。
+
 ## 四、自检
 
 ```bash

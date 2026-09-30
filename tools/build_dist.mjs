@@ -22,7 +22,8 @@
  *
  * 只读镜像: `--api` 不给时注入 `window.JIANPU_READONLY=true` —— 检索/谱页全在浏览器里跑,
  * 但"投稿/补收录/补标签"要写回本机服务, 纯静态托管做不到, 前端就直接说人话, 而不是发一个必 404 的请求。
- * 想让它照样能投稿: `--api https://jianpu-web.pages.dev`(Worker 允许跨域, 再由它转发给本机)。
+ * 想让它照样能投稿: `--api https://jianpu-db.org`(Worker 允许跨域, 再由它转发给本机; 老地址
+ *   jianpu-web.pages.dev 仍然可用, 只是不再是门面)。
  *
  * ⚠ 只带 `.gz` 的数据文件: 明文 `data/songs.jsonl`(13MB) 与 `images.jsonl`(3MB) 是**本地生成、
  *   .gitignore 掉**的, 云端构建拿不到它们。所以没有 DecompressionStream 的老浏览器在云端

@@ -3,6 +3,10 @@ name: Deploy to GitHub Pages
 # 把前端发到 **GitHub Pages**。
 #
 # 站点: **https://jianpu-db.github.io/** —— 仓库是组织站 `jianpu-db/jianpu-db.github.io`
+#
+# ⚠ 2026-09-30: **正式域名是 https://jianpu-db.org/**（Cloudflare Worker, 有写回: 投稿/补属性/补标签）。
+#   这条流水线发的这份从现在起是**只读镜像**（老链接与备份用途）; 它页面上的提示会把人指到域名,
+#   canonical 也指域名。两份产物都要重建 —— 只重建一份会出现"镜像与正式站不是同一版代码"。
 # (`<org>.github.io` 这种仓库发在**域名根**; 普通项目仓库才在 `/<repo>/` 子路径。
 #  两种位置产物都支持: index.html 里那段内联 <base> 会按"文档地址 = 应用根 + 可能多的 s/<id>"
 #  摆正相对路径 —— 自检里跑的正是更难的子路径那种。)

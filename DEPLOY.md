@@ -62,11 +62,20 @@ curl -s https://jianpu-db.org/api/health
 本机服务**故意只听 127.0.0.1**（它能写盘 + git commit）。给域名用时走隧道（出向连接，不需要公网 IP、
 不需要端口映射，自带 HTTPS）：
 
-```bash
-cloudflared tunnel --url http://127.0.0.1:8770        # 拿一个 https://xxx.trycloudflare.com
-npx wrangler secret put API_UPSTREAM                  # 填上面那个地址
-npx wrangler secret put API_TOKEN                     # 与本机 JPSUBMIT_TOKEN 同值
+```bat
+rem 一条命令搞定（看服务在不在 -> 起隧道 -> 读出地址 -> 写两个 secret -> 验健康）；纯 cmd，**不需要 PowerShell**
+tools\tunnel_up.cmd
+
+rem 手工三件套也行:
+cloudflared tunnel --url http://127.0.0.1:8770        rem 拿一个 https://xxx.trycloudflare.com
+npx wrangler secret put API_UPSTREAM                  rem 填上面那个地址
+npx wrangler secret put API_TOKEN                     rem 与本机 JPSUBMIT_TOKEN 同值
 ```
+
+> **逻辑只有一份**，在 `jianpu2/tools/tunnel_up.py`：`tunnel_up.cmd`（纯 cmd）、`tunnel_up.sh`、
+> `tunnel_up.ps1` 都只是"找到 Python 再调它"的薄壳。**目标机器没有 PowerShell 也照样用**
+> —— 第一版把逻辑写在 `.ps1` 里，用户当场指出"那台电脑用不了 pwsh"，于是改成 Python + 薄壳。
+> 脚本里没有 `npx` 时会**跳过写 secret 并打印手工做法**（面板也能加），所以那台机器只要有 Python + cloudflared。
 
 **坑（当天踩到）**：`API_UPSTREAM` / `IMG_UPSTREAM` 原本写在 `wrangler.jsonc` 的 `"vars"` 里，
 而 `vars` 与 `secret` **共用"绑定名"命名空间** —— 再 `secret put` 同名就会报

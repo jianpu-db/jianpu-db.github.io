@@ -121,6 +121,15 @@ def main():
     elif a.corpus == "none":
         pass
 
+    # 3b) 隧道脚本: 目标机器要把"写服务"对外提供时用得上（纯 cmd/sh 薄壳 + 一份 Python 逻辑）
+    for f in ("tunnel_up.py", "tunnel_up.cmd", "tunnel_up.sh"):
+        src = os.path.join(os.path.dirname(ROOT), "jianpu2", "tools", f)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(out, f))
+            n += 1
+        else:
+            print(f"  ! 缺 {src}（便携包里就没有隧道脚本了）")
+
     ver = version_line()
     io.open(os.path.join(out, "VERSION"), "w", encoding="utf-8", newline="\n").write(ver + "\n")
 
@@ -224,6 +233,19 @@ npx wrangler secret put API_TOKEN        # 与本机环境变量 JPSUBMIT_TOKEN 
 | `JIANPU_HOST` | `127.0.0.1` | 监听地址（给局域网用才改 `0.0.0.0`） |
 | `JPSUBMIT_TOKEN` | 空 | 设了就要求 `X-Token`（隧道/公网必须设） |
 | `JIANPU_IMAGES` | 自动 | 原图目录（冒号分隔），没有就 404，不影响检索 |
+
+## 让别人也能用（把"写"服务对外提供）
+
+本机没有可用的入向公网地址，所以走 Cloudflare 快速隧道。包里带了 `tunnel_up.cmd`（Windows，**纯 cmd**）
+/ `tunnel_up.sh`（macOS/Linux）—— 它们只是薄壳，逻辑在 `tunnel_up.py` 里：
+
+* 起服务（带 `JPSUBMIT_TOKEN`）→ 起隧道 → 读出地址 → 写进 Worker（`npx wrangler secret put API_UPSTREAM/API_TOKEN`）
+  → 验 `https://jianpu-db.org/api/health` 的 `api` 是否为 true；
+* **这台机器没有 Node/npx 也不影响起服务与隧道** —— 脚本会跳过写 secret 并打印手工做法
+  （或在 Cloudflare 面板 Workers & Pages → jianpu-web → Settings → Variables and Secrets 里加）。
+
+⚠️ 对外之前**一定**要让服务要求 `X-Token`（脚本会检查，没有就拒绝继续）：否则等于把"往语料仓库写东西"的
+接口挂在公网上。
 
 ## 更新语料
 

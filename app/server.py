@@ -37,8 +37,32 @@ from urllib.parse import quote, unquote
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WS = os.path.dirname(ROOT)                     # 工作区根(images/ 与 images-prep/ 就在这下面)
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8770
-DB = os.environ.get("JIANPU_DB", r"D:\Documents_D\jianpu-db")
+
+
+def _find_db():
+    """语料仓库在哪 —— **先看环境变量，再看几个约定位置**（2026-09-30 为了"开箱即用的包"）。
+
+    为什么要这么写: 原来默认值写死成 `D:\\Documents_D\\jianpu-db`（本机专用），换台机器/做便携包必炸。
+    查找顺序:
+      1. `JIANPU_DB`（显式指定，最高优先）；
+      2. `<包根>/corpus/jianpu-db`  —— 便携包的布局（首次运行脚本 clone 到这里）；
+      3. `../jianpu-db`            —— 本机开发布局（站点仓库与语料仓库平级）；
+      4. 当前工作目录下的 `jianpu-db`。
+    都找不到也**不报错退出**（只读检索仍可用），写入类接口会明确告诉你 DB 指到哪里去了。
+    """
+    cands = [os.environ.get("JIANPU_DB", "").strip(),
+             os.path.join(ROOT, "corpus", "jianpu-db"),
+             os.path.join(os.path.dirname(ROOT), "jianpu-db"),
+             os.path.join(os.getcwd(), "jianpu-db")]
+    for c in cands:
+        if c and os.path.isdir(c):
+            return os.path.abspath(c)
+    return os.path.abspath(cands[1])           # 都不在 -> 指向包内布局(首次运行脚本会建它)
+
+
+PORT = int(os.environ.get("JIANPU_PORT") or (sys.argv[1] if len(sys.argv) > 1 else 8770))
+HOST = os.environ.get("JIANPU_HOST", "127.0.0.1")
+DB = _find_db()
 FEEDBACK = os.path.join(DB, "feedback")
 TOKEN = os.environ.get("JPSUBMIT_TOKEN", "")
 sys.stdout.reconfigure(encoding="utf-8")
@@ -82,7 +106,12 @@ IMG_ROOTS = image_roots()
 # 简谱 token 口径**只有一份**: 复用 skill 目录里的 jptok.py。
 # 这里以前自带一份"前缀时值"正则 —— 投稿里若写 `6c.`/`5s`/`3q` 这种**后缀**时值,
 # 那些 token 会被判成"不是音符"而整段丢掉(与 2026-09-23 索引丢音事故同一个坑)。
-sys.path.insert(0, os.path.join(ROOT, "..", "jianpu2", "skills", "jianpu-melody-lookup"))
+# ⚠ 除了本机开发布局(../jianpu2/skills/…), 也把 `<包>/app` 加进来 —— 便携包里 jptok.py
+#   就放在 app/ 旁边（见 tools/make_server_bundle.py），这样"开箱即用"的那份口径与本机一致。
+for _p in (os.path.join(ROOT, "..", "jianpu2", "skills", "jianpu-melody-lookup"),
+           os.path.join(ROOT, "app")):
+    if os.path.isdir(_p):
+        sys.path.insert(0, _p)
 try:
     import jptok
 except Exception:                       # 兜底正则: 与 jptok.py 同口径(时值+变音前后都认)
@@ -702,8 +731,8 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"简谱旋律查歌 + 零登录投稿 -> http://127.0.0.1:{PORT}/")
+    print(f"简谱旋律查歌 + 零登录投稿 -> http://{HOST}:{PORT}/")
     print(f"投稿落库: {DB}  (feedback/ 留档; 给了数字就直接进 scores/)")
     print(f"每谱一页: /s/<id>  ·  原图: {IMG_PREFIX}<工作区相对路径> <- {IMG_ROOTS}")
     print(f"token 保护: {'开' if TOKEN else '关(仅本机/内网使用)'}")
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), H).serve_forever()

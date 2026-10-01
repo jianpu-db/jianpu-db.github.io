@@ -55,6 +55,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+
+      # ⚠ 2026-10-01 修（D 阶段查 CI 时发现的**我自己造成的**回归）:
+      #   B 阶段给这个 workflow 加了 `npm run typecheck`，又让 `build_dist.mjs` 依赖 esbuild ——
+      #   两者都在 `node_modules` 里，可这个 workflow **从来没装过依赖**（它以前只用 Node 内置模块，
+      #   所以一直没事）。结果 push 之后 `Deploy to GitHub Pages` 直接红了。
+      #   本地一直是绿的，因为本地有 node_modules —— 这就是"CI 不是本机"的经典一课。
+      - name: 安装依赖（构建与类型检查都需要 node_modules）
+        run: npm ci
 
       # 本仓库那套 Pages 自检: 产物断言 + 按 Pages 真实规矩起的静态服务(runner 上没有 geckodriver,
       # 真浏览器那步自己跳过)。**哪种模式都跑** —— 它才是"代码没坏"的证据。

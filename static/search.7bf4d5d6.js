@@ -170,6 +170,32 @@ function cost(q, cd, ca) {
   if (ca === 0) return 2;
   return 3;
 }
+function bestWindow(s, q, limitCost) {
+  const n = q.length;
+  const { P, A } = arraysOf(s);
+  if (P.length < n) return null;
+  let best = null;
+  const cap = limitCost ?? Number.POSITIVE_INFINITY;
+  for (let i = 0; i + n <= P.length; i++) {
+    let c = 0;
+    let aborted = false;
+    for (let k = 0; k < n; k++) {
+      c += cost(q[k], P[i + k], A[i + k]);
+      if (best && c > best.cost || c > cap) {
+        aborted = true;
+        break;
+      }
+    }
+    if (aborted) continue;
+    if (!best || c < best.cost) {
+      best = { cost: c, at: i, sec: secNameAt(s, i, n) };
+    } else if (c === best.cost) {
+      const nm = secNameAt(s, i, n);
+      if (secWeightOf(nm) > secWeightOf(best.sec)) best = { cost: c, at: i, sec: nm };
+    }
+  }
+  return best;
+}
 function search(idx, segs, opt) {
   const o = opt ?? {};
   const top = o.top || 10;
@@ -182,20 +208,10 @@ function search(idx, segs, opt) {
       const n = q.length;
       let best = null;
       for (const s of members) {
-        const { P, A } = arraysOf(s);
-        if (P.length < n) continue;
-        for (let i = 0; i + n <= P.length; i++) {
-          let c = 0;
-          for (let k = 0; k < n; k++) {
-            c += cost(q[k], P[i + k], A[i + k]);
-            if (best && c > best.cost) break;
-          }
-          if (!best || c < best.cost) {
-            best = { cost: c, at: i, song: s, q, sec: secNameAt(s, i, n) };
-          } else if (c === best.cost) {
-            const nm = secNameAt(s, i, n);
-            if (secWeightOf(nm) > secWeightOf(best.sec)) best = { cost: c, at: i, song: s, q, sec: nm };
-          }
+        const w = bestWindow(s, q);
+        if (!w) continue;
+        if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
+          best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
         }
       }
       if (!best) {
@@ -282,6 +298,7 @@ function search(idx, segs, opt) {
 export {
   SEC_CN,
   SEC_W,
+  bestWindow,
   buildIndex,
   popKey,
   search,

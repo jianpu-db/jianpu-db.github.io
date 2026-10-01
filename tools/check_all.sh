@@ -35,6 +35,10 @@ echo; echo "=== 归组重复报告（非门槛）==="
 node tools/check_dup_groups.mjs 2>&1 | tail -n 6
 echo; echo "=== 精确重复旋律报告（非门槛）==="
 node tools/check_dup_melody.mjs 2>&1 | tail -n 8
+# 前端口径的召回评测: 同一份基准跑**上线的 search.ts**（基准在工具仓库，没有就自己跳过）。
+# 为什么单独有它: 离线 Python 评测验不到 TS 侧 —— 剪枝最坏就是"把目标歌剪掉"，离线口径看不出来。
+echo; echo "=== 前端口径召回（基准在工具仓库, 没有就跳过）==="
+node tools/check_recall.mjs 2>&1 | tail -n 6
 # 前端 jptok.js 与 Python 侧 jptok.py 的**token 口径**等价性(第三份口径的锁, 见 check_jptok_parity.sh)。
 # 需要 jianpu2/jianpu-db 就在旁边; 扫全语料约 30s, JIANPU_QUICK=1 时跳过。
 ROOT="$(dirname "$WEB")"

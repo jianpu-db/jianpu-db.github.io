@@ -66,14 +66,24 @@ def main() -> int:
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(a.out, m))
 
+    # ⚠ 一定要让仓库**有东西可提交**：git 不跟踪空目录，如果既没挑到曲谱也没拷到模块，
+    #   基线 `git commit` 会以 "nothing to commit" 失败 -> 写后端里"提交那一步"就永远验证不到
+    #   （CI 上真发生了：隔离库连基线都没有，两边都提交不了，等于少测了一条路径）。
+    iso_readme = os.path.join(a.out, "README.iso.md")
+    with open(iso_readme, "w", encoding="utf-8", newline="\n") as f:
+        f.write("# 隔离语料库（对拍/自检用）\n\n"
+                "这个仓库由 `tools/make_isolated_db.py` 生成，**不是**真语料。\n"
+                "写后端的自检会真写盘 + `git commit`，所以必须在这样的一次性仓库里跑。\n")
+
     git(["init", "-q", "."], a.out)
     git(["-c", "user.email=iso@local", "-c", "user.name=iso", "add", "-A"], a.out)
     git(["-c", "user.email=iso@local", "-c", "user.name=iso", "commit", "-qm", "隔离实例基线"], a.out)
 
+    has_commit = git(["rev-list", "--count", "HEAD"], a.out) == 0
     print(f"  隔离库: {a.out}")
-    print(f"  scores/ {len(picked)} 份: {', '.join(picked) if picked else '(真语料里没挑到，检查 --db)'}")
-    print(f"  口径模块: {', '.join(m for m in MODULES if os.path.exists(os.path.join(a.out, m)))}")
-    print(f"  git: {'基线已提交' if git(['rev-list', '--count', 'HEAD'], a.out) == 0 else '还没有提交'}")
+    print(f"  scores/ {len(picked)} 份: {', '.join(picked) if picked else '(没挑到真曲谱 —— CI 里正常)'}")
+    print(f"  口径模块: {', '.join(m for m in MODULES if os.path.exists(os.path.join(a.out, m))) or '(无 —— CI 里正常)'}")
+    print(f"  git 基线: {'已提交' if has_commit else '**没有提交（写回那步会失败）**'}")
     print(f"  用法: JIANPU_DB={a.out} py -3.13 app/api.py 8790")
     return 0
 

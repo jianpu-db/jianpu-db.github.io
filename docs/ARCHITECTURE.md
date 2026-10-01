@@ -155,6 +155,7 @@ link=https://…           # 人工核对过的收录页（搜索页会被拒收
 | `https://jianpu-db.github.io/` | GitHub Pages（只读镜像） | 只读；写操作提示"去正式站" |
 | `http://127.0.0.1:8770/` | 本机写后端（**FastAPI 版**） | 开发/内网；**唯一真正写盘 + git commit 的地方**；`/docs` 有交互式接口文档；退回标准库版: `py -3.13 app/server.py 8770` |
 | 便携包 `jianpu-server/` | 同一份服务的可搬走版本 | 换台电脑：Python + （可选）cloudflared 即可 |
+| **容器** `docker compose up -d api` | 一条命令起写后端（`--profile tunnel` 连隧道一起） | 语料**挂卷**（投稿要 `git commit` 到真仓库）；镜像构建在 CI 的 `docker` job 里验证 |
 
 关键点：
 * **`assets.run_worker_first`** 必须设 —— 否则 `/s/<id>` 这种"靠 SPA 回退"的请求在资源层就被接走，
@@ -170,3 +171,4 @@ link=https://…           # 人工核对过的收录页（搜索页会被拒收
 | 浏览器检索 | 索引就绪 204 ms；查询中位 **151 ms**（p90 198 ms） | 全库代价匹配 O(曲数×查询长) | 倒排剪枝（先按 n-gram 候选）、或把匹配核心 **Rust→Wasm**（阶段 E） |
 | 索引下发 | 5.12 MB gz | 每次打开页面一次 | 拆冷热索引、PWA Cache Storage 常驻 |
 | 写路径 | 依赖隧道与开机 | 本机在线才有写能力 | 可选上云（R2/D1）或改成"队列 + 稍后入库" |
+| 观测 | `/api/health` + `/metrics` | 读路径指标在 Cloudflare 侧（分析面板/Worker 指标），写路径指标在 `/metrics`（Prometheus 文本格式，可被任意 Prometheus/Grafana 抓） | 把"上游死活"做成告警规则（`upstreamOk`）、把投稿漏斗做成面板 |

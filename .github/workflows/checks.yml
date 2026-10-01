@@ -42,8 +42,23 @@ jobs:
         run: npm run typecheck
       - name: 前端检索口径检查（含 buildIndex 字段回归）
         run: node tools/check_search.mjs
+      # 深链/高亮那三个检查要一个**真在跑的服务**（它们会按 `/s/<id>` 路径取页面并解析 DOM）。
+      # 用**标准库版** `app/server.py` 起就行: 零依赖（runner 上的 python3 够用），
+      # 不需要 fastapi/uv —— 这样 web 这条流水线不必装 Python 依赖。
+      - name: 起静态服务（标准库版，零依赖）供深链自检
+        run: |
+          set -e
+          python3 app/server.py 8770 &
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8770/api/health >/dev/null; then echo "服务起来了（第 $i 次）"; exit 0; fi
+            sleep 1
+          done
+          echo "::error title=标准库版服务没起来::20 秒内 /api/health 没通"; exit 1
       - name: UI / 深链 / 高亮 检查
-        run: node tools/check_ui.mjs && node tools/check_tune.mjs && node tools/check_page.mjs
+        run: |
+          node tools/check_ui.mjs
+          node tools/check_tune.mjs http://127.0.0.1:8770
+          node tools/check_page.mjs http://127.0.0.1:8770
       - name: token 解析互锁（Python↔JS 口径）
         run: node tools/check_jptok_js.mjs
       - name: 分享卡元数据检查

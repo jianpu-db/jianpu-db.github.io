@@ -63,15 +63,23 @@ def call(base, method, path, body, token):
         return -1, {}, str(e).encode()
 
 
-def norm_body(status, headers, raw, base=""):
+def norm_body(status, headers, raw, base="", db=""):
     """把响应体归一到"可比较"的形态：
-      * JSON: 去掉 health 里那两处**有意差异**的字段（server/version）；
-      * HTML: 把"本机 origin"（含端口）换成占位符 —— `/s/<id>` 的 canonical/og:url 里写着
-        `http://127.0.0.1:8776` vs `:8777`，那是**端口不同**造成的，不是行为差异（第一次对拍
-        就被这条误报了一次：两边 body 前 200 字一模一样，差异在后面几行）。
+
+      * **去掉两边"环境不同"带来的噪声**（这些不是行为差异，是测试装置的差异）：
+        - `base`（本机 origin，含端口）：`/s/<id>` 的 canonical/og:url 里写着
+          `http://127.0.0.1:8776` vs `:8777` —— 第一次对拍就被这条误报过（正文前 200 字一样，差异在后面）；
+        - `db`（隔离语料库路径）：两边各自的隔离库路径不同，而错误文案里会带上它
+          （如"找不到 linkurl.py —— JIANPU_DB=D:\\…\\ci-iso1 对吗?"）—— CI 里空语料库时**4 条全部误报**，
+          正是这一条让我发现"对拍脚本自己也得对环境做归一化"。
+      * JSON: 去掉 health 里那两处**有意差异**的字段（server/version）。
     """
     if base:
         raw = raw.replace(base.rstrip("/").encode(), b"<ORIGIN>")
+    if db:
+        raw = raw.replace(db.encode(), b"<DB>")
+        # Windows 上正文里可能出现转义过的反斜杠（`D:\\path`），一并归一
+        raw = raw.replace(db.replace("\\", "\\\\").encode(), b"<DB>")
     ct = (headers.get("Content-Type") or headers.get("content-type") or "").lower()
     if "json" in ct:
         try:
@@ -92,12 +100,27 @@ def main():
     ap.add_argument("--token", default="", help="两边都要带的 X-Token（测鉴权路径）")
     a = ap.parse_args()
 
+    # 两边各自的隔离语料库路径（错误文案里会带它，属于"环境差异"而非"行为差异"）
+    db_old = db_new = ""
+    for srv, which in ((a.old, "old"), (a.new, "new")):
+        try:
+            with urllib.request.urlopen(srv.rstrip("/") + "/api/health", timeout=10) as r:
+                v = json.loads(r.read().decode("utf-8")).get("repo") or ""
+        except Exception:
+            v = ""
+        if which == "old":
+            db_old = v
+        else:
+            db_new = v
+    print(f"  环境归一: 旧库={db_old or '(未报告)'} · 新库={db_new or '(未报告)'}")
+
     same = diff = 0
     print(f"对拍: 旧 {a.old}  vs  新 {a.new}" + (f"  (X-Token={'有' if a.token else '无'})"))
     for method, path, body, note in CASES:
         s1, h1, b1 = call(a.old, method, path, body, a.token)
         s2, h2, b2 = call(a.new, method, path, body, a.token)
-        n1, n2 = norm_body(s1, h1, b1, a.old), norm_body(s2, h2, b2, a.new)
+        n1 = norm_body(s1, h1, b1, a.old, db_old)
+        n2 = norm_body(s2, h2, b2, a.new, db_new)
         cors1 = h1.get("Access-Control-Allow-Origin") or h1.get("access-control-allow-origin") or "-"
         cors2 = h2.get("Access-Control-Allow-Origin") or h2.get("access-control-allow-origin") or "-"
         ok = (s1 == s2) and (n1 == n2) and (cors1 == cors2)

@@ -17,3 +17,9 @@
 *.ico binary
 *.woff binary
 *.woff2 binary
+# 显式再钉一遍（笼统规则已覆盖，但这两类最容易出事故: shell 要 LF、Windows 批处理要 CRLF）
+*.sh   text eol=lf
+*.mjs  text eol=lf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf

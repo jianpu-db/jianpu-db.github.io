@@ -99,6 +99,25 @@ curl -s -X POST https://jianpu-db.org/api/submit -H 'Content-Type: application/j
 > 快速隧道（`*.trycloudflare.com`）**每次重启换地址**，正式用建议命名隧道绑 `api.jianpu-db.org`
 > （需要先跑一次 `cloudflared tunnel login` 点授权）。
 
+## 一·补三、404 语义（2026-10-02 定，别再改回去）
+
+`wrangler.jsonc` 的 `not_found_handling = "single-page-application"` 会把**任何**找不到的路径
+用 `200 + index.html` 返回。这在"缺失假装成功"上非常危险（客户端把 HTML 当数据解析；
+自检只看状态码就被骗过去）。所以 Worker 里显式改成：
+
+* **SPA 兜底只对页面路由生效**：`/`、`/index.html`、`/404.html`
+  （页面级深链 `/s/<id>` 在此之前单独处理）；
+* 其余路径一律按"资源"对待 —— 查到 `text/html` 就说明它并不存在，返回 **404 text/plain**。
+
+为什么不用"前缀白名单 + 扩展名规则"：两者都被绕过过 ——
+`/img/../jianpu-db/score.py` 会被 URL 规范化成 `/jianpu-db/score.py`（前缀看不见），
+`/img/images/../../etc/passwd` 规范化后是 `/etc/passwd`（没有扩展名）。**原则比补丁收敛得快。**
+
+实测：线上 `check_live` 全绿；三条越界路径全 404；`/`、`/s/<id>`、`/data/songs.jsonl.gz`、
+`/robots.txt`、`/sitemap.xml` 全部正常。
+
+顺便记一条实测：同一份索引从**边缘**（本域名）下载 **3.1 s**，从 GitHub Pages 镜像 **18.9 s**（6 倍）。
+
 ## 二、（可选）原图与投稿后端
 
 * **原图走 R2**（否则 Worker 会去 `IMG_UPSTREAM` 反代，走你家上行）：

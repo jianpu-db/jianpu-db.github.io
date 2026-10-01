@@ -90,7 +90,7 @@ flowchart TB
 | 多页拼接 | 一份谱多张图 → 一份稿 | `JP_MULTIPAGE=1`，页数上限 `JP_MULTIPAGE_MAX=4` |
 | 成品化 | token 流 → 带头部元数据的曲谱文件 | `to_jianpu_db.py`（复用旧成品里的拍号/人工标记/composer→mbid 缓存） |
 | 索引 | 曲谱 → 检索索引 + 分享卡索引 | `build_web_data.py` → `songs.jsonl.gz` / `stats.json` / `og.json` / `sitemap.xml`；前端 `tsc` 类型检查 + esbuild 擦除后按内容哈希发布 |
-| 边缘 | 静态资产、每谱注入、原图、反向代理写请求 | Cloudflare Workers（V8 isolates）+ Workers Assets（`run_worker_first`） |
+| 边缘 | 静态资产、每谱注入、原图、反向代理写请求；**缺失资源一律 404**（SPA 兜底只对页面路由生效 —— 见 `TECH_STACK.md` 的 STAR 14） | Cloudflare Workers（V8 isolates）+ Workers Assets（`run_worker_first`） |
 | 前端 | 检索/卡片/谱页/深链，**全部在浏览器里跑** | TypeScript（**零运行时依赖**的 ES module；esbuild 只做类型擦除、不打包）；`tsc` 三份配置：前端核心 strict、主界面过渡（DOM 胶水层待收紧）、Worker strict |
 | 写服务 | 校验 → 改曲谱 → `git commit` → 触发重建 | **两份实现、一份口径**：`app/api.py`（FastAPI + Pydantic v2，主力，`/docs` 自动文档）与 `app/server.py`（标准库版，零依赖，随时可退回）；经隧道暴露，`X-Token` 鉴权；切换前用对拍矩阵逐项验证 |
 | 语料仓库 | 唯一真源（曲谱 + 索引 + 留档） | git（CI 重建 + Pages 发布） |

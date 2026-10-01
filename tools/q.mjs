@@ -1,8 +1,9 @@
 // node tools/q.mjs <旋律串>  —— 用前端索引(权威)跑一次真实查询
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, search } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 
 const q = process.argv[2];
 const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));

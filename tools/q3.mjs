@@ -1,8 +1,9 @@
 // node tools/q3.mjs <旋律串>  —— 全库找"最接近的窗口", 列出前 12 名(不限曲名)
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 
 const Q = parseQuery(process.argv[2]);
 const qd = Q.map((x) => x.d);

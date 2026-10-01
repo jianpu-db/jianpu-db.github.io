@@ -7,9 +7,10 @@
 //
 // 用法: node tools/bench_search.mjs 30
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, search } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 
 const N = Number(process.argv[2] || 20);
 const QUERIES = [

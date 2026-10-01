@@ -271,7 +271,11 @@ function cautionChips(r) {
   return out;
 }
 
-function renderScore(raw, at, qlen, bars) {
+// 导出给检查脚本用（`tools/check_page.mjs` 断言"片段渲染 + 高亮 + 小节线"）。
+// ⚠ 2026-10-01 发现: 这个函数一直**没有** export，而 check_page 里写的是 `app.renderScore(...)`
+//   —— 于是那条自检从写下的那天起就没真正跑过（一直抛 `app.renderScore is not a function`，
+//   被脚本的 try/catch 包成"未捕获异常"打在最后）。做 TS 迁移时因为要改 import 方式才发现。
+export function renderScore(raw, at, qlen, bars) {
   if (!raw) return '';
   var toks = raw.split(' ');
   var barSet = {};

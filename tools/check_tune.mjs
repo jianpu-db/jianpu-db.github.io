@@ -12,6 +12,7 @@
 // 这个脚本真跑一遍 app.js 的路由: 把 location 摆成深链, 让 app.js 自己渲, 再检查 HTML。
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
+import { importStatic } from './_built.mjs';
 
 const songsBuf = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
 const rows = gunzipSync(songsBuf).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -61,7 +62,7 @@ process.on('uncaughtException', (e) => errors.push('未捕获异常: ' + (e && e
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-await import('../static/app.js');
+await importStatic('app');
 await sleep(1600);
 
 let fail = 0;
@@ -74,8 +75,14 @@ console.log(`样本: ${WITH.id} 「${WITH.g}」 · src ${(WITH.src || '').length
 ok(mkEl('home').hidden === true && mkEl('tune').hidden === false, '深链进来时首页藏起、谱页显示');
 ok(html.includes(WITH.g || WITH.t), '标题渲出来了');
 ok(/class="tune-h1"/.test(html) && /class="crumb"/.test(html), '有标题与"回检索"面包屑');
-ok(/class="meta"/.test(html) && /<th>歌手<\/th>/.test(html) && /<th>状态<\/th>/.test(html),
-   '元数据表完整(歌手/状态都在)');
+  // ⚠ 2026-10-01 修（TS 迁移时发现的**陈旧断言**）: 原来断言字面量 `<th>歌手</th>`，
+  //   可是 schema 化之后表头是 `<th><span title="…schema 的 note…">歌手</span></th>`，
+  //   于是这条**永远不可能通过**（一直红着被当成"已知失败"）。现在先把 `<th>` 里的标签剥掉
+  //   再比文字 —— 既容得下包装，又真的在检查"歌手/状态这两栏在不在"。
+  const thLabels = (h) => (h.match(/<th>[\s\S]*?<\/th>/g) || [])
+    .map((x) => x.replace(/<[^>]+>/g, '').trim());
+  ok(/class="meta"/.test(html) && thLabels(html).includes('歌手') && thLabels(html).includes('状态'),
+     '元数据表完整(歌手/状态都在)');
 ok(html.includes(WITH.id), '页面上写明了这一页的 id');
 ok(WITH.srcurl ? html.includes(WITH.srcurl) : true, '「出处」那一行链到原站页面');
 

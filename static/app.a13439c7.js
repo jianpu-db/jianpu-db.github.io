@@ -1,5 +1,5 @@
-import { buildIndex, search } from './search.dccb810f.js';
-import { parseQuery, parseToken, isPitch, show } from './jptok.f2563838.js';
+import { buildIndex, search } from './search.650bfe33.js';
+import { parseQuery, parseToken, isPitch, show } from './jptok.5bf64237.js';
 
 /* 数据侧: 只需要"曲名 + 出处" 就能给出可点的外链 —— 不依赖任何 API/key */
 var REPO = 'Francium-223/jianpu-db';

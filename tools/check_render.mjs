@@ -1,5 +1,6 @@
 // node tools/check_render.mjs —— 用假 DOM 真触发一次查询, 验证结果卡(含元数据表)真的渲染出来
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
 
 const els = {};
 function mkEl(id) {
@@ -35,7 +36,7 @@ global.fetch = async (u) => {
 global.DecompressionStream = (await import('node:stream/web')).DecompressionStream;
 process.on('unhandledRejection', (e) => { console.error('!! Promise 拒绝:', e && e.message); process.exitCode = 1; });
 
-await import('../static/app.js');
+await importStatic('app');
 await new Promise((r) => setTimeout(r, 1500));
 
 mkEl('q').value = '63731232';

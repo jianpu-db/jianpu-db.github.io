@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, parseQuery, search } = await importStatic('search');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, parseQuery, search } from '../static/search.js';
 
 const txt = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8');
 const idx = buildIndex(txt);

@@ -61,6 +61,12 @@ jobs:
       - name: 自检（GH Pages 规矩）
         run: JIANPU_QUICK=1 bash tools/check_gh_pages.sh
 
+      # B 阶段（TypeScript 化）: 前端源码是 `static/*.ts`，构建前先做**类型检查**。
+      # 为什么不塞进 build: 构建只做类型擦除、要快；类型检查单独一步，红了看得清楚，
+      # 本地也能用同一条命令复现（`npm run typecheck`）。
+      - name: 类型检查（前端 TS）
+        run: npx tsc -p tsconfig.json
+
       - name: 构建产物
         run: node tools/build_dist.mjs --target gh --out dist
 

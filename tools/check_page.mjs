@@ -3,6 +3,7 @@
 // 默认查询 63731232; 传 `33565653253` 可复现"th10_06 开头休止被误标黑"那个 bug 的回归测试。
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
+import { importStatic } from './_built.mjs';
 const QUERY = process.argv[2] || '63731232';
 
 // ---- 假 DOM ----
@@ -41,14 +42,14 @@ global.DecompressionStream = (await import('node:stream/web')).DecompressionStre
 process.on('unhandledRejection', (e) => { console.error('!! 未处理的 Promise 拒绝:', e && e.message); process.exitCode = 1; });
 process.on('uncaughtException', (e) => { console.error('!! 未捕获异常:', e && e.message); process.exitCode = 1; });
 
-await import('../static/app.js');
+await importStatic('app');
 await new Promise((r) => setTimeout(r, 1200));
 console.log('status 文本:', (mkEl('status').textContent || '(空)').slice(0, 80));
 
 // 触发一次查询(直接调 run 不可达, 改为手动走一遍同一路径)
-const { buildIndex, search } = await import('../static/search.js');
-const { parseQuery, parseToken, isPitch } = await import('../static/jptok.js');
-const app = await import('../static/app.js');
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery, parseToken, isPitch } = await importStatic('jptok');
+const app = await importStatic('app');
 const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
 const q = parseQuery(QUERY);
 const res = search(idx, [q], { top: 2 });

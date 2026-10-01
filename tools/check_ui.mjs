@@ -3,9 +3,10 @@
 // 捕获 app.js 注册的事件处理器并**真的触发一次查询**, 所以 render() 里的运行时错误藏不住。
 // (URL 参数会被忽略 —— 本脚本读本地 data/, 只为与 check_all.sh 的其他脚本统一调用方式。)
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, search } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 const argv = process.argv.slice(2).filter((a) => !/^https?:\/\//.test(a));
 const SONGS_TXT = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8');
 

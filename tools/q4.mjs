@@ -1,8 +1,9 @@
 // node tools/q4.mjs <旋律串>  —— 移调不变检索: 试 12 个移调, 看哪个移调下 0 代价
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 
 const Q = parseQuery(process.argv[2]);
 const qd = Q.map((x) => x.d);

@@ -14,6 +14,7 @@
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { importStatic } from './_built.mjs';
 
 const BASE = (process.argv[2] || 'http://127.0.0.1:8770').replace(/\/$/, '');
 // ⚠ 2026-09-28 修: 原来用 `new URL('..', import.meta.url).pathname`。在 Windows 上 pathname
@@ -21,8 +22,10 @@ const BASE = (process.argv[2] || 'http://127.0.0.1:8770').replace(/\/$/, '');
 //   `file:///D:/D:/Documents_D/...` —— 本自检直接 ERR_MODULE_NOT_FOUND 跑不起来
 //   (Linux 上正常, 所以一直没暴露)。标准写法是 fileURLToPath。
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const { buildIndex, search } = await import(pathToFileURL(resolve(ROOT, 'static/search.js')).href);
-const { parseQuery } = await import(pathToFileURL(resolve(ROOT, 'static/jptok.js')).href);
+// B 阶段（TypeScript 化）: 前端源码是 `static/*.ts`，Node 不能直接 import —— 走 `_built.mjs`
+// 用 esbuild 按需做类型擦除（只擦类型、不改语义），所以这里测的**就是**线上那份逻辑。
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 
 async function main() {
   let fail = 0;

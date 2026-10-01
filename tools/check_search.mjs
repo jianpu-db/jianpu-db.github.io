@@ -1,8 +1,9 @@
 // node tools/check_search.mjs —— 前端检索 headless 校验(与 Python 侧 lookup_acc.py 同口径)
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery, show } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, search } from '../static/search.js';
-import { parseQuery, show } from '../static/jptok.js';
 
 const gz = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
 const t0 = Date.now();
@@ -75,3 +76,34 @@ for (const [q, want, note] of CASES) {
   if (!ok) console.log('     候选:', res.map((r) => `${r.group}(${r.cost})`).join(' | '));
 }
 console.log(`\n通过 ${pass}/${CASES.length}`);
+
+// ── 回归: 索引字段必须**穿过 buildIndex**（2026-10-01 TS 化时抓到的 bug）───────────────
+// 原来 `buildIndex` 的字段白名单里没有 `conf` / `confP10`，于是:
+//   ① 并列裁决里"转写置信度高优先"这条永远拿到 0.5（等于没生效）；
+//   ② 卡片上的置信度永远显示不出来。
+// 这是本项目**第 5 次**栽在"白名单式字段复制"上，所以在这里钉一颗钉子:
+let fldFail = 0;
+const fld = (cond, msg) => { console.log((cond ? '✓ ' : '✗ ') + msg); if (!cond) fldFail++; };
+const withConf = idx.songs.filter((s) => s.conf != null && s.conf !== '').length;
+const rowsWithConf = (() => {
+  let n = 0;
+  for (const line of gunzipSync(gz).toString('utf8').split('\n')) {
+    if (!line) continue;
+    try { if (JSON.parse(line).conf != null) n++; } catch { /* 跳过坏行 */ }
+  }
+  return n;
+})();
+fld(rowsWithConf > 0, `索引行里有 ${rowsWithConf} 首带 conf（数据侧非空）`);
+fld(withConf === rowsWithConf,
+    `conf 穿过 buildIndex: ${withConf} == ${rowsWithConf}（差一个都算丢字段）`);
+const resConf = search(idx, [parseQuery('5 1 1 1 1 5 6 7 1 1')], { top: 5 }).filter((r) => r.conf != null);
+fld(resConf.length > 0, `结果里能拿到 conf（样例 ${resConf.length} 条，例 ${resConf[0] ? resConf[0].conf : '—'}）`);
+const groupsOf = new Map();
+for (const s of idx.songs) {
+  if (!groupsOf.has(s.group)) groupsOf.set(s.group, new Set());
+  groupsOf.get(s.group).add(s.source || '');
+}
+const dupGroups = [...groupsOf.values()].filter((v) => v.size >= 2).length;
+fld(dupGroups > 0, `"版本数按 source 去重"有实际对象: ${dupGroups} 组有多个不同 source`);
+if (fldFail) { console.log(`\n索引字段回归失败 ${fldFail} 项`); process.exit(1); }
+

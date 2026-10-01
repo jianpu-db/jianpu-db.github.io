@@ -33,6 +33,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, wr
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transform } from 'esbuild';   // B 阶段: 前端源码是 .ts, 构建时只做类型擦除(不打包, 保持零运行时依赖)
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -52,7 +53,7 @@ const API = argOf('api', '');            // 只有 gh 目标用得上; 不给 = 
 
 // ⚠ **顺序 = 依赖顺序**(见 hashedStatic 的说明): jptok/search/style 不 import 别人, app 引用它们。
 //   名字由"改写后的最终内容"算, 所以引用者必须在被引用者**之后**才算。
-const STATIC_FILES = ['jptok.js', 'search.js', 'style.css', 'app.js'];
+const STATIC_FILES = ['jptok.js', 'search.js', 'style.css', 'app.js'];   // 名字按**产物**写; 源文件优先取同名 .ts(见 sourceOf)
 // 静态资源带**内容哈希**文件名(app.<hash>.js): 否则 `_headers` 里的长缓存会让部署后
 // 部分边缘节点继续发旧 JS —— 实测踩到(截图上谱页还在渲染碎图 / 浏览器里 img 数为 0, 两种结果并存)。
 // 带哈希后长缓存就安全了: 内容一变 URL 就变。JS 里 `./search.js` 这类 import 也要一起改。
@@ -98,12 +99,35 @@ function put(src, rel) {
  */
 const HASH_ORDER = STATIC_FILES;       // 依赖在前, 引用者在后
 
-function hashedStatic() {
+/** 源文件：优先 `.ts`，没有就退回 `.js`（B 阶段正在把前端迁到 TypeScript）。
+ *
+ * 为什么保留 `.js` 兜底：迁移要**一步一步来**（先 jptok/search，再 app），中间态必须照样能构建、能上线；
+ * 而且 `style.css` 这类本来就不是 TS。
+ */
+async function sourceOf(name) {
+  // ⚠ 拼 `.ts` 之前必须**去掉扩展名** —— 第一版写成 `name + '.ts'`，于是找的是 `jptok.js.ts`；
+  //   找不到就退回 `static/jptok.js`，而那个文件在迁移时已经删了 -> **静默跳过**（产物里少两个文件，
+  //   构建却"成功"，页面会跑旧版本或 404）。现在少文件直接算失败（见 hashedStatic 里的 missing）。
+  const base = name.replace(/\.(js|css)$/, '');
+  const ts = join(ROOT, 'static', base + '.ts');
+  if (existsSync(ts)) {
+    const raw = readFileSync(ts, 'utf8');
+    const res = await transform(raw, { loader: 'ts', format: 'esm', target: 'es2022',
+                                       charset: 'utf8', sourcefile: ts });
+    return { file: base + '.ts', body: res.code.replace(/\r\n/g, '\n'), transpiled: true };
+  }
+  const f = join(ROOT, 'static', name);
+  if (!existsSync(f)) return null;
+  return { file: name, body: readFileSync(f, 'utf8').replace(/\r\n/g, '\n'), transpiled: false };
+}
+
+async function hashedStatic() {
   const map = {};                       // 原名 -> 新名
+  const missing = [];
   for (const f of HASH_ORDER) {
-    const src = join(ROOT, 'static', f);
-    if (!existsSync(src)) continue;
-    let body = readFileSync(src, 'utf8').replace(/\r\n/g, '\n');   // 见 ②
+    const src = await sourceOf(f);
+    if (!src) { missing.push(f); continue; }
+    let body = src.body;                                           // 见 ②
     for (const [oldName, newName] of Object.entries(map)) {        // 只可能引用**已算完**的那些
       body = body.split('./' + oldName).join('./' + newName);
     }
@@ -116,7 +140,8 @@ function hashedStatic() {
     writeFileSync(dst, body);
     const sz = statSync(dst).size;
     n += 1; bytes += sz;
-    console.log(`  ${rel.padEnd(28)} ${(sz / 1e6).toFixed(2)} MB  (原名 ${f})`);
+    console.log(`  ${rel.padEnd(28)} ${(sz / 1e6).toFixed(2)} MB  (原名 ${src.file}`
+                + `${src.transpiled ? ' · esbuild 转译' : ''})`);
   }
   // index.html 里的 ./static/xxx 也改掉
   let html = readFileSync(join(DIST, 'index.html'), 'utf8');
@@ -124,6 +149,10 @@ function hashedStatic() {
     html = html.split('./static/' + oldName).join('./static/' + newName);
   }
   writeFileSync(join(DIST, 'index.html'), html);
+  if (missing.length) {          // 见 sourceOf 的注释: 少文件不能算"构建成功"
+    console.error(`  ! 缺少源文件: ${missing.join(', ')} —— 检查 static/ 下有没有同名 .ts 或 .js`);
+    process.exitCode = 1;
+  }
   return map;
 }
 
@@ -144,7 +173,7 @@ function injectFlags() {
 
 console.log(`拼 ${DIST.slice(ROOT.length + 1) || DIST}/  (target=${TARGET}${TARGET === 'gh' ? (API ? `, api=${API}` : ', 只读') : ''}):`);
 put(join(ROOT, 'static', 'index.html'), 'index.html');          // 入口必须在资源根上
-hashedStatic();
+await hashedStatic();
 for (const f of DATA_FILES) put(join(ROOT, 'data', f), `data/${f}`);
 // 不带哈希的静态资源（2026-09-30 加）: 分享卡片图 —— OG 标签里的地址必须**稳定**，
 // 所以它不能参与内容哈希改名（social 平台会长期缓存这个 URL）。

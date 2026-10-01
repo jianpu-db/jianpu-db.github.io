@@ -1,0 +1,21 @@
+{
+  // 浏览器侧（static/*.ts）的类型检查配置。Worker 侧另有一份 `tsconfig.worker.json`
+  // （它的运行时是 Workers，拿 @cloudflare/workers-types，不能和 DOM lib 混在一起）。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["static/**/*.ts"]
+}

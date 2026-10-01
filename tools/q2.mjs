@@ -1,8 +1,9 @@
 // node tools/q2.mjs <旋律串> <曲名子串>  —— 在指定曲目里找最接近的 11 音窗口
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, search } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 
 const target = process.argv[3] || '神々';
 const Q = parseQuery(process.argv[2]);

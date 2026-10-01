@@ -9,8 +9,9 @@
 //   py -3.13 jianpu2/tools/dump_jptok_tokens.py            # -> jianpu2/train-work/jptok_tokens.tsv
 // 再跑本脚本。它会拿全语料里**每一个不同的 token** 去问两边的 is_note / is_pitch /
 // duration_letter / beat 是否一致, 不一致就退非 0 并打印例子。
+import { importStatic } from './_built.mjs';
+const { parseToken, isPitch, beat } = await importStatic('jptok');
 import { readFileSync } from 'node:fs';
-import { parseToken, isPitch, beat } from '../static/jptok.js';
 
 const path = process.argv[2] || 'D:/Documents_D/jianpu2/train-work/jptok_tokens.tsv';
 const lines = readFileSync(path, 'utf8').split('\n').filter((l) => l.trim());

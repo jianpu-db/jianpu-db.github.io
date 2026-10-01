@@ -11,9 +11,10 @@
 //       --dump-queries /tmp/queries.tsv
 //   node tools/check_js_parity.mjs /tmp/queries.tsv
 import { readFileSync } from 'node:fs';
+import { importStatic } from './_built.mjs';
+const { buildIndex, search } = await importStatic('search');
+const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
-import { buildIndex, search } from '../static/search.js';
-import { parseQuery } from '../static/jptok.js';
 
 const dump = process.argv[2];
 const limit = process.argv.includes('--limit') ? Number(process.argv[process.argv.indexOf('--limit') + 1]) : 0;

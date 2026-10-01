@@ -12,3 +12,6 @@ dist*/
 
 # B 阶段: 检查脚本按需转译 .ts 的缓存(tools/_built.mjs)
 static/.build/
+
+# B 阶段: 检查脚本按需转译 .ts 的缓存(tools/_built.mjs) —— 任意目录下的 .build/
+**/.build/

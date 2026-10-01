@@ -4,7 +4,15 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
-const QUERY = process.argv[2] || '63731232';
+import { waitFor } from './_wait.mjs';
+// ⚠ 2026-10-01 修（CI 上 `web · node 22` 的"高亮 + 收录页"红）:
+//   这个脚本原来把 **argv[2] 当查询串**，而同一批的其它检查（check_ui/check_tune/check_live）
+//   argv[2] 是**服务 URL**。于是 CI 里按家族约定传了 URL -> 脚本拿
+//   `http://127.0.0.1:8801` 去当旋律查询 -> "标黑的音 = 查询"必然失败（打印出来是 67766 vs 12711，
+//   那串数字其实就是 URL 里的 127/8801）。本机怎么都复现不出，因为本机我有时不带参数跑。
+//   现在统一约定: argv[2] = URL（本脚本其实用不到，收下即可），argv[3] = 可选的查询串覆盖。
+const URL_ARG = process.argv[2] && /^https?:\/\//.test(process.argv[2]) ? process.argv[2] : '';
+const QUERY = process.argv[3] || (URL_ARG ? '' : process.argv[2]) || '63731232';
 
 // ---- 假 DOM ----
 const handlers = {};
@@ -43,7 +51,14 @@ process.on('unhandledRejection', (e) => { console.error('!! 未处理的 Promise
 process.on('uncaughtException', (e) => { console.error('!! 未捕获异常:', e && e.message); process.exitCode = 1; });
 
 await importStatic('app');
-await new Promise((r) => setTimeout(r, 1200));
+// 等 **app 把索引建好**（信号: 它建完索引会调 fillTagList() 把标签灌进 #taglist 的 innerHTML），
+// 而不是睡一个固定 1200 ms —— 固定睡眠在 CI 上会随机红（见 tools/_wait.mjs 顶部说明）。
+{
+  const ms = await waitFor(() => (mkEl('taglist').innerHTML || '').length > 0, 20000);
+  console.log(ms < 0
+    ? '  ! 等了 20 秒 #taglist 还是空的（app 可能没建完索引）'
+    : `  （索引在 ${ms} ms 内就绪）`);
+}
 console.log('status 文本:', (mkEl('status').textContent || '(空)').slice(0, 80));
 
 // 触发一次查询(直接调 run 不可达, 改为手动走一遍同一路径)

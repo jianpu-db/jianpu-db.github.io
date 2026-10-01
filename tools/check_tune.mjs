@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
+import { sleep, waitFor } from './_wait.mjs';
 
 const songsBuf = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
 const rows = gunzipSync(songsBuf).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -60,10 +61,21 @@ const errors = [];
 process.on('unhandledRejection', (e) => errors.push('未处理的 Promise 拒绝: ' + (e && e.message)));
 process.on('uncaughtException', (e) => errors.push('未捕获异常: ' + (e && e.message)));
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 await importStatic('app');
-await sleep(1600);
+
+/** 等"谱页真的渲出来"，而不是睡一个固定秒数。
+ *
+ * ⚠ 2026-10-01 修（CI 上 `web · node 22` 红在"深链（每谱一页）"这一步）:
+ *   原来是 `await sleep(1600)` —— 本地够，CI 的 runner 更慢/更抖（app 初始化要 fetch 索引 + 建索引），
+ *   1600 ms 不够就随机红，而且**本地怎么都复现不出**（我把便携版 Node 22 下下来跑，照样过）。
+ *   固定睡眠做等待就是"假红/假绿"的温床: 换成**轮询到出现预期内容**（最多 20 秒），
+ *   本地更快、CI 更稳，失败时还能打印"等了多久、当时页面是什么"。
+ */
+const waited = await waitFor(() => /tune-h1/.test(mkEl('tune').innerHTML));
+console.log(waited < 0
+  ? `  ! 等了 20 秒谱页还没渲出来（页面片段: ${mkEl('tune').innerHTML.slice(0, 120)}）`
+  : `  （谱页在 ${waited} ms 内就绪）`);
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fail++; };

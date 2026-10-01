@@ -65,8 +65,11 @@ let errors = [];
 process.on('unhandledRejection', (e) => errors.push('未处理的 Promise 拒绝: ' + (e && e.message)));
 process.on('uncaughtException', (e) => errors.push('未捕获异常: ' + (e && e.message)));
 
-await import('../static/app.js');
-await new Promise((r) => setTimeout(r, 1500));
+await importStatic('app');
+{
+  const ms = await waitFor(() => handlers['form'] && handlers['form'].submit, 20000);
+  console.log(ms < 0 ? '  ! 等了 20 秒 app 还没注册表单处理器' : `  （app 在 ${ms} ms 内就绪）`);
+}
 mkEl('q').value = QUERY;
 const h = handlers['form'] && handlers['form'].submit;
 if (!h) { console.error('!! app.js 没有给 #form 注册 submit 处理器'); process.exit(1); }
@@ -75,7 +78,7 @@ try {
 } catch (e) {
   errors.push('run() 抛异常: ' + e.message);
 }
-await new Promise((r) => setTimeout(r, 800));
+await waitFor(() => mkEl('out').innerHTML.length > 0, 20000);   // 等查询结果渲出来
 
 const status = mkEl('status').textContent;
 const out = mkEl('out').innerHTML;

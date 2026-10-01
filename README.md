@@ -6,7 +6,7 @@
 [![音符](https://img.shields.io/badge/%E9%9F%B3%E7%AC%A6-2%2C532%2C332-0b62c4)](https://jianpu-db.org/)
 [![小节线](https://img.shields.io/badge/%E6%98%BE%E5%BC%8F%E5%B0%8F%E8%8A%82%E7%BA%BF-552%2C836-0b62c4)](https://jianpu-db.org/)
 [![索引](https://img.shields.io/badge/%E7%B4%A2%E5%BC%95-5.12%20MB%20gz%20%C2%B7%20%E5%B0%B1%E7%BB%AA%20204%20ms-177245)](https://jianpu-db.org/)
-[![查询](https://img.shields.io/badge/%E6%9F%A5%E8%AF%A2%E4%B8%AD%E4%BD%8D-151%20ms-177245)](https://jianpu-db.org/)
+[![查询](https://img.shields.io/badge/%E6%9F%A5%E8%AF%A2%E4%B8%AD%E4%BD%8D-106%20ms-177245)](https://jianpu-db.org/)
 [![Top-1](https://img.shields.io/badge/%E9%87%91%E6%9B%B2%E6%A6%9C%20L%3D15%20%E9%94%990%20Top--1-98.9%25-177245)](https://jianpu-db.org/)
 [![自检](https://img.shields.io/badge/%E8%87%AA%E6%A3%80%2FQA-78%20%E4%B8%AA%E8%84%9A%E6%9C%AC-946200)](https://jianpu-db.org/)
 

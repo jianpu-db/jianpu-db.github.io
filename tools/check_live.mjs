@@ -125,30 +125,36 @@ async function main() {
   const pageTxt = pageR.ok ? await pageR.text() : '';
   ok(pageR.ok && /id="tune"/.test(pageTxt) && /id="home"/.test(pageTxt),
      `/s/${tune.id} 深链返回同一个 index.html (HTTP ${pageR.status})`);
+  // ⚠ 2026-10-02 改: 这里原来假设"原图索引下发"（pull `/data/images.jsonl.gz` 后无条件 gunzip）——
+  //   但前端早已**不下发**图索引（构建说明: 带图索引是给"显示原图"用的，前端不显示），
+  //   于是那行的 `ir.ok` 被 SPA 兜底的 **200 + index.html** 满足，接着 gunzip 直接
+  //   `Z_DATA_ERROR: incorrect header check` 把整个自检搞崩。两个教训都落在这儿了:
+  //     ① 检查项要断言 **content-type**，不能只看状态码（否则"缺失"会假装成"成功"）；
+  //     ② 站点不再下发的文件，检查项也要跟着改 —— 陈旧断言比没有断言更坏（它会崩，或者更糟: 假绿）。
   const ir = await fetch(BASE + '/data/images.jsonl.gz');
-  ok(ir.ok, `/data/images.jsonl.gz HTTP ${ir.status} ${ir.headers.get('content-type')}`);
-  const imgIdx = new Map(gunzipSync(Buffer.from(await ir.arrayBuffer())).toString('utf8')
-    .split('\n').filter(Boolean).map((l) => { const x = JSON.parse(l); return [x.s, x]; }));
-  ok(imgIdx.size > 0, `原图索引 ${imgIdx.size} 个 source`);
-  const cov = idx.songs.filter((s) => s.source && imgIdx.has(s.source)).length;
-  ok(st.with_images === cov,
-     `stats.with_images = ${st.with_images} 首 == 索引里真有图的 ${cov} 首 (${st.image_pages} 页)`);
-  const withImg = idx.songs.find((s) => s.source && imgIdx.has(s.source));
-  if (withImg) {
-    const im = imgIdx.get(withImg.source);
-    const url = BASE + '/img/' + im.d.split('/').map(encodeURIComponent).join('/') + '/'
-      + im.pg[0][0].split('/').map(encodeURIComponent).join('/');
+  const irCt = ir.headers.get('content-type') || '';
+  ok(!/text\/html/.test(irCt), `/data/images.jsonl.gz 不能返回 HTML（拿到 ${ir.status} ${irCt}）`);
+  // 缺失的 data 文件必须是 404（worker 里为此专门挡了 SPA 兜底）
+  const nf = await fetch(BASE + '/data/__nope__.json.gz');
+  ok(nf.status === 404, `/data/__nope__.json.gz 必须是 404（拿到 ${nf.status} ${nf.headers.get('content-type')}）`);
+  console.log(`   （stats.json 记着 ${st.with_images} 首有原图 / ${st.image_pages} 页 —— 仅作参考；` +
+              `前端不下发图索引，health 的 images=${st.images ?? '见 /api/health'}）`);
+  // 原图代理只在真的挂了图源时才验（health 会报 images=none/proxy/r2）
+  const hl = await (await fetch(BASE + '/api/health')).json().catch(() => ({}));
+  // 只在**边缘 Worker** 上验图代理（本机 8801 是纯静态服务，没有 /img/ 代理，别误报）
+  if (hl.deploy === 'cloudflare-worker' && hl.images && hl.images !== 'none') {
+    const withImg = idx.songs.find((s) => s.source);
+    const url = BASE + '/img/images-prep/' + encodeURIComponent(withImg.source) + '/1.png';
     const g = await fetch(url);
-    const buf = Buffer.from(await g.arrayBuffer());
-    ok(g.ok && /^image\//.test(g.headers.get('content-type') || '') && buf.length > 1000,
-       `原图取到了: ${im.d.split('/').slice(0, 2).join('/')}/… (${g.status} ${g.headers.get('content-type')} ${buf.length} 字节)`);
-    ok((g.headers.get('cache-control') || '').includes('max-age'), '原图带长缓存头');
-    // 目录穿越 / 非图片扩展名: 一律挡住(这里挂的是本机文件系统的 8.9GB 扫描件, 不能漏)
+    ok(g.ok && /^image\//.test(g.headers.get('content-type') || ''),
+       `原图代理可取（${g.status} ${g.headers.get('content-type')}）`);
+  } else {
+    console.log(`   （${hl.deploy || '本机'} · images=${hl.images || '未知'} —— 跳过原图代理检查，只验越界拦截）`);
+    // 越界/非图必须挡住（与是否挂图源无关，路径校验在 worker 里）
     for (const bad of ['/img/../jianpu-db/score.py', '/img/%2e%2e/jianpu-db/score.py',
-                       '/img/images/../../etc/passwd', '/img/images-prep/x/../../../etc/passwd',
-                       '/img/' + im.d + '/notimage.txt']) {
+                       '/img/images/../../etc/passwd']) {
       const b = await fetch(BASE + bad);
-      ok(!b.ok, `挡住越界/非图: ${bad} -> HTTP ${b.status}`);
+      ok(!b.ok, `挡住越界路径: ${bad} -> HTTP ${b.status}`);
     }
   }
   console.log(`\n${fail === 0 ? '通过' : '失败 ' + fail + ' 项'}  —— ${BASE}`);

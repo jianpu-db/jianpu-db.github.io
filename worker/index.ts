@@ -225,6 +225,32 @@ export default {
     if (path === '/s' || path.startsWith('/s/')) {
       return serveSongPage(request, env, url);
     }
+    // ⚠ **静态资源/数据文件缺失时必须是 404，不能落到 SPA 兜底**（2026-10-02 实测踩到）:
+    //   `wrangler.jsonc` 里 `not_found_handling = "single-page-application"` —— 任何找不到的路径
+    //   都会**用 200 + index.html** 返回。后果是"缺失"假装成"成功":
+    //     * `check_live.mjs` 拉 `/data/images.jsonl.gz`（前端早已不下发图索引）拿到 200 + text/html，
+    //       接着无条件 gunzip -> `Z_DATA_ERROR: incorrect header check`，整个自检崩掉；
+    //     * 任何客户端只要看状态码就会把 HTML 当数据解析 —— 这类"静默成功"最难查。
+    //   data/ 与 static/ 下面**没有** HTML（json/gz/js/css/png），所以用 content-type 判定很稳。
+    //   ② 只按前缀挡（`/img/…`）**不够**，加"带扩展名"规则**也不够** —— 修的过程中连着发现两次:
+    //      * `new URL('/img/../jianpu-db/score.py').pathname` 会先被**规范化**成 `/jianpu-db/score.py`，
+    //        前缀判断看不到 `/img/`；
+    //      * `/img/images/../../etc/passwd` 规范化后是 `/etc/passwd` —— **没有扩展名**，
+    //        所以"看起来像文件"的规则也漏。
+    //      补丁式的白名单/黑名单会一直漏，于是改成**原则**: SPA 兜底**只对页面路由**生效
+    //      （`/` `/index.html` `/404.html`；页面级深链 `/s/<id>` 上面已单独处理）。
+    //      其余任何路径都按"资源"对待：查到 HTML 就说明它并不存在 -> 404。
+    const isPageRoute = path === '/' || path === '' || path === '/index.html' || path === '/404.html';
+    if (!isPageRoute) {
+      const r = await env.ASSETS.fetch(request);
+      const ct = r.headers.get('content-type') || '';
+      if (r.status === 404 || ct.includes('text/html')) {
+        return new Response('not found', {
+          status: 404, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      return r;
+    }
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;

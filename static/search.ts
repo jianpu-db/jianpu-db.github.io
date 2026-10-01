@@ -35,6 +35,8 @@ export interface Song {
   artist: string[]; transcriber: string[]; hot: number; mbid: string;
   links: string[]; srcurl: string;
   conf?: string | null; confP10?: string | null;
+  /** 在**扁平语料数组**里的下标（wasm 的代价表按它索引；buildIndex 时填） */
+  i: number;
   _p?: NoteArrays;
   _sec?: Array<[number, string]>;
 }
@@ -76,7 +78,18 @@ export interface SearchResult {
   qNotes: Note[];
 }
 
-export interface SearchOpt { top?: number; c1?: number; c2?: number; c3?: number }
+/** 外部（wasm）算好的"每首最小代价"表：`costs[song.i]`，没命中 = 0xFFFFFFFF。 */
+export interface SegmentScan { costs: Uint32Array; ats: Uint32Array }
+
+export interface SearchOpt {
+  top?: number; c1?: number; c2?: number; c3?: number;
+  /**
+   * 可选加速: 每段一张表（下标 = `Song.i`）。给了就走"先用表选组内最小代价、再对达到该代价的
+   * 少数成员用 TS 复算窗口"的快路径 —— **结果必须与不给表时逐条相同**（`tools/check_wasm_parity.mjs`
+   * 会拿两边跑同一批查询比对）。没给就照旧全扫（纯 TS 路径，永远可用）。
+   */
+  scan?: (SegmentScan | null)[] | null;
+}
 
 const BAD = /吉他|钢琴|双谱|器乐|非洲|尤克里里|古筝|琵琶|二胡|笛|萨克斯|总谱|合唱/;
 const TAIL = /(?:[-_（(]?\s*(?:简谱|歌曲类|歌谱|五线谱|正谱|完整版|弹唱|吉他谱|钢琴谱)\s*[)）]?)+$/;
@@ -116,8 +129,10 @@ export function buildIndex(text: string): Index {
       // ⚠ 2026-10-01（TypeScript 化时）补上: 转写置信度。以前漏了它，导致
       //   ① 并列裁决里"置信度高优先"永远拿到 0.5（等于没这条）；② 卡片上永远不显示置信度。
       conf: r.conf ?? null, confP10: r.confP10 ?? null,
+      i: 0,                                        // 先占位，建完 songs 再统一填（见下）
     });
   }
+  songs.forEach((s, i) => { s.i = i; });          // 填语料下标（wasm 表用）
   const groups = new Map<string, Song[]>();
   for (const s of songs) {
     if (!groups.has(s.group)) groups.set(s.group, []);
@@ -284,16 +299,37 @@ export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResul
     let total = 0, exact = 0;
     const det: Hit[] = [];
     let ok = true;
-    for (const q of segs) {
+    for (let si = 0; si < segs.length; si++) {
+      const q = segs[si]!;
       const n = q.length;
       let best: Hit | null = null;
-      for (const s of members) {
-        const w = bestWindow(s, q);
-        if (!w) continue;
-        // 与原实现同序: 严格更小才替换（组内先到者优先），同代价时按段落权重
-        if (!best || w.cost < best.cost
-            || (w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec))) {
-          best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
+      const tbl = o.scan ? o.scan[si] : null;
+      if (tbl) {
+        // ── 快路径: 表里已有"每首最小代价"，只对达到该代价的成员用 TS 复算窗口 ──────────
+        //    为什么还要复算: 段落权重换窗与 exact 计数是产品口径（留在 TS）；而"哪些成员可能赢"
+        //    由表决定，所以复算的成员数极少（实测一条查询 ~几首），语义与全扫**完全同序**。
+        let minCost = 0xffffffff;
+        for (const s of members) { const c = tbl.costs[s.i]!; if (c < minCost) minCost = c; }
+        if (minCost === 0xffffffff) { ok = false; break; }
+        for (const s of members) {
+          if (tbl.costs[s.i] !== minCost) continue;
+          const w = bestWindow(s, q, minCost);
+          if (!w) continue;
+          if (!best || w.cost < best.cost
+              || (w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec))) {
+            best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
+          }
+        }
+      }
+      if (!best && !tbl) {
+        for (const s of members) {
+          const w = bestWindow(s, q);
+          if (!w) continue;
+          // 与原实现同序: 严格更小才替换（组内先到者优先），同代价时按段落权重
+          if (!best || w.cost < best.cost
+              || (w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec))) {
+            best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
+          }
         }
       }
       if (!best) { ok = false; break; }
@@ -330,18 +366,37 @@ export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResul
   //   不是按 source。现在按 `source`（=索引里的 `s`，形如 `qupu123-396822`）去重 ✓。
   const versOf = (r: Candidate): number =>
     new Set((idx.groups.get(r.group) ?? []).map((s) => s.source || '')).size;
-  res.sort((x, y) =>
-    x.total - y.total ||
-    okOf(x) - okOf(y) ||
-    confOf(y) - confOf(x) ||
-    versOf(y) - versOf(x) ||
-    y.exact - x.exact ||
-    (idx.pop.get(popKey(y.group)) || 0) - (idx.pop.get(popKey(x.group)) || 0) ||
-    (idx.hot.get(y.group) || 0) - (idx.hot.get(x.group) || 0) ||   // 并列: 歌手在库里谱多的先
-    y.secW - x.secW ||                                            // 段落权: 副歌/主歌 > 间奏 > 整曲 > 前奏/尾奏/发狂钢琴(用户选 B)
-    (BAD.test(x.group) ? 1 : 0) - (BAD.test(y.group) ? 1 : 0) ||
-    x.group.length - y.group.length ||
-    (x.group < y.group ? -1 : 1));
+
+  // ⚠ **2026-10-01（E 阶段做基准时发现的真瓶颈）**: 比较器里每次都现算
+  //   `versOf()` —— 它内部 `new Set(...)` + `.map()`，于是 `O(n log n)` 次比较里
+  //   **每次都新分配一个 Set**（n ≈ 1 万时这是几百万次分配）。实测: `search()` 本体
+  //   136 ms 里绝大部分花在这儿，而"扫描 + 匹配"只占 ~35 ms —— 我一开始以为瓶颈在匹配，
+  //   花了两轮去优化它（wasm），结果整体只快 0.87×；把这里修掉才是真收益。
+  //   修法: **每个候选只算一次**排序键，比较器只比数字。
+  type Keyed = { r: Candidate; ok: number; conf: number; vers: number; pop: number; hot: number; bad: number };
+  const keyed: Keyed[] = res.map((r) => ({
+    r,
+    ok: okOf(r),
+    conf: confOf(r),
+    vers: versOf(r),
+    pop: idx.pop.get(popKey(r.group)) || 0,
+    hot: idx.hot.get(r.group) || 0,
+    bad: BAD.test(r.group) ? 1 : 0,
+  }));
+  keyed.sort((a, b) =>
+    a.r.total - b.r.total ||
+    a.ok - b.ok ||
+    b.conf - a.conf ||
+    b.vers - a.vers ||
+    b.r.exact - a.r.exact ||
+    b.pop - a.pop ||
+    b.hot - a.hot ||
+    b.r.secW - a.r.secW ||
+    a.bad - b.bad ||
+    a.r.group.length - b.r.group.length ||
+    (a.r.group < b.r.group ? -1 : 1));
+  res.length = 0;
+  for (const k of keyed) res.push(k.r);
   // **代价并列有几首**: 排序后与头名同代价的组数(前端据此提示"这句不是唯一命中")
   const bestTotal = res.length ? res[0]!.total : 0;
   let groupsAtBest = 0;

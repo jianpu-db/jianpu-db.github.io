@@ -28,7 +28,7 @@ if (!existsSync(WASM)) {
   process.exit(0);
 }
 
-const { buildIndex, bestWindow } = await importStatic('search');
+const { buildIndex, bestWindow, search } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
 
 const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
@@ -168,3 +168,47 @@ console.log(`\n对拍 ${queries.length} 条查询 × ${songs.length} 首 = ${(qu
             + `段落权重换窗 ${rewin.toLocaleString()}），用时 ${dt}s`);
 if (bad) { console.log(`**不一致 ${bad} 处** —— wasm 与 TS 的代价口径漂了，别上线`); process.exit(1); }
 console.log('TS ↔ Wasm 契约成立 ✓：代价逐首一致；at 只在「同代价按段落权更换窗」处不同（那是刻意留在 TS 的口径）');
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ② **端到端对拍**：同一批查询，`search()` 走"表快路径"与"纯 TS 全扫"的结果必须**逐条相同**
+//
+// 这是真正决定"能不能上线"的一条: 前面比的是单首代价，这里比的是**最终卡片**
+// （多段相加、段落权重、并列裁决、人气、来源去重……全都在里面）。
+// ══════════════════════════════════════════════════════════════════════════════
+console.log('\n② 端到端: 表快路径 vs 纯 TS 全扫');
+const MULTI = [...queries, '63731232; 1765', '55532235 3211612655', '66165535 532322 7656'];
+let e2eBad = 0, e2eChecked = 0;
+const tE0 = Date.now();
+for (const raw of MULTI) {
+  const segs = raw.split(/[;；|、+，,]+/).map(parseQuery).filter((s) => s.length >= 5);
+  if (!segs.length) continue;
+  // 用 wasm 给每段造表
+  const tables = segs.map((q) => {
+    const qd = Uint8Array.from(q.map((x) => 48 + x.d));
+    const qa = Int8Array.from(q.map((x) => x.acc));
+    const qPtr = ex.jp_alloc(qd.length), qaPtr = ex.jp_alloc(qa.length);
+    new Uint8Array(ex.memory.buffer, qPtr, qd.length).set(qd);
+    new Int8Array(ex.memory.buffer, qaPtr, qa.length).set(qa);
+    ex.jp_scan_all(qPtr, qaPtr, qd.length, outPtr);
+    const costs = new Uint32Array(songs.length), ats = new Uint32Array(songs.length);
+    const rawOut = new Uint32Array(ex.memory.buffer, outPtr, songs.length * 2);
+    for (let i = 0; i < songs.length; i++) { costs[i] = rawOut[i * 2]; ats[i] = rawOut[i * 2 + 1]; }
+    return { costs, ats };
+  });
+  const key = (r) => r.map((x) => `${x.group}|${x.cost}|${x.at}|${x.exact}|${x.sec}`).join(' ;; ');
+  const withWasm = search(idx, segs, { top: 10, scan: tables });
+  const pureTs = search(idx, segs, { top: 10 });
+  e2eChecked++;
+  if (key(withWasm) !== key(pureTs)) {
+    e2eBad++;
+    console.log(`  ✗ ${String(raw).slice(0, 40)}`);
+    console.log(`     表: ${key(withWasm).slice(0, 160)}`);
+    console.log(`     TS: ${key(pureTs).slice(0, 160)}`);
+  } else {
+    console.log(`  ✓ ${String(raw).slice(0, 40).padEnd(42)} 前 3 条: ` +
+      withWasm.slice(0, 3).map((r) => `${r.group}(${r.cost})`).join(', '));
+  }
+}
+console.log(`\n端到端对拍 ${e2eChecked} 条查询（含多段）· 用时 ${((Date.now() - tE0) / 1000).toFixed(1)}s`);
+if (e2eBad) { console.log(`**结果不一致 ${e2eBad} 条** —— 快路径不能上线`); process.exit(1); }
+console.log('表快路径与纯 TS 全扫**结果逐条相同** ✓（可以上线）');

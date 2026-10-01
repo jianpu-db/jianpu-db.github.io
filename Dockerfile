@@ -38,7 +38,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # 写后端本体 + 它要服务的静态文件（静态文件在容器里是"读"的，语料是挂进来的）
 COPY app/ ./app/
 COPY static/ ./static/
-COPY data/ ./data/
+# 只把**运行时真读**的两个 JSON 拷进来（`/s/<id>` 的 meta 注入要用 og.json，stats 接口要用 stats.json）。
+# 检索索引（songs.jsonl[.gz]，5–31 MB）不进镜像：写后端用不到，前端要从容器里跑就挂卷。
+COPY data/og.json data/stats.json ./data/
 COPY index.html 404.html ./
 COPY run-api.sh ./
 # 非 root 跑（容器里能被写的地方只有挂进来的 /corpus）

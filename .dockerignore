@@ -2,11 +2,17 @@
 .git
 .gitignore
 .github
-# 语料是挂卷进来的，不是烤进来的
+# 语料是挂卷进来的，不是烤进来的。
+# ⚠ 2026-10-01 修: 原来把 data/*.json 也忽略了 -> `COPY data/ ./data/` 匹配不到任何文件,
+#   Docker 会直接报 "no source files were specified" 让**整个 docker job 红**（本机没 Docker，只有 CI 能发现）。
+#   现在只忽略 5 MB 的检索索引（写后端用不到；前端要从容器里跑的话再挂卷），
+#   保留 og.json / stats.json —— `/s/<id>` 的 meta 注入与 stats 接口都真读它们。
 corpus
+data/songs.jsonl
 data/songs.jsonl.gz
-data/og.json
-data/stats.json
+data/images.jsonl
+data/images.jsonl.gz
+data/refresh.log
 misc
 train-work
 # 前端/工具产物与缓存

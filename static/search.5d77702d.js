@@ -55,9 +55,14 @@ function buildIndex(text) {
       // ⚠ 2026-10-01（TypeScript 化时）补上: 转写置信度。以前漏了它，导致
       //   ① 并列裁决里"置信度高优先"永远拿到 0.5（等于没这条）；② 卡片上永远不显示置信度。
       conf: r.conf ?? null,
-      confP10: r.confP10 ?? null
+      confP10: r.confP10 ?? null,
+      i: 0
+      // 先占位，建完 songs 再统一填（见下）
     });
   }
+  songs.forEach((s, i) => {
+    s.i = i;
+  });
   const groups = /* @__PURE__ */ new Map();
   for (const s of songs) {
     if (!groups.has(s.group)) groups.set(s.group, []);
@@ -170,6 +175,32 @@ function cost(q, cd, ca) {
   if (ca === 0) return 2;
   return 3;
 }
+function bestWindow(s, q, limitCost) {
+  const n = q.length;
+  const { P, A } = arraysOf(s);
+  if (P.length < n) return null;
+  let best = null;
+  const cap = limitCost ?? Number.POSITIVE_INFINITY;
+  for (let i = 0; i + n <= P.length; i++) {
+    let c = 0;
+    let aborted = false;
+    for (let k = 0; k < n; k++) {
+      c += cost(q[k], P[i + k], A[i + k]);
+      if (best && c > best.cost || c > cap) {
+        aborted = true;
+        break;
+      }
+    }
+    if (aborted) continue;
+    if (!best || c < best.cost) {
+      best = { cost: c, at: i, sec: secNameAt(s, i, n) };
+    } else if (c === best.cost) {
+      const nm = secNameAt(s, i, n);
+      if (secWeightOf(nm) > secWeightOf(best.sec)) best = { cost: c, at: i, sec: nm };
+    }
+  }
+  return best;
+}
 function search(idx, segs, opt) {
   const o = opt ?? {};
   const top = o.top || 10;
@@ -178,23 +209,36 @@ function search(idx, segs, opt) {
     let total = 0, exact = 0;
     const det = [];
     let ok = true;
-    for (const q of segs) {
+    for (let si = 0; si < segs.length; si++) {
+      const q = segs[si];
       const n = q.length;
       let best = null;
-      for (const s of members) {
-        const { P, A } = arraysOf(s);
-        if (P.length < n) continue;
-        for (let i = 0; i + n <= P.length; i++) {
-          let c = 0;
-          for (let k = 0; k < n; k++) {
-            c += cost(q[k], P[i + k], A[i + k]);
-            if (best && c > best.cost) break;
+      const tbl = o.scan ? o.scan[si] : null;
+      if (tbl) {
+        let minCost = 4294967295;
+        for (const s of members) {
+          const c = tbl.costs[s.i];
+          if (c < minCost) minCost = c;
+        }
+        if (minCost === 4294967295) {
+          ok = false;
+          break;
+        }
+        for (const s of members) {
+          if (tbl.costs[s.i] !== minCost) continue;
+          const w = bestWindow(s, q, minCost);
+          if (!w) continue;
+          if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
+            best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
           }
-          if (!best || c < best.cost) {
-            best = { cost: c, at: i, song: s, q, sec: secNameAt(s, i, n) };
-          } else if (c === best.cost) {
-            const nm = secNameAt(s, i, n);
-            if (secWeightOf(nm) > secWeightOf(best.sec)) best = { cost: c, at: i, song: s, q, sec: nm };
+        }
+      }
+      if (!best && !tbl) {
+        for (const s of members) {
+          const w = bestWindow(s, q);
+          if (!w) continue;
+          if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
+            best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
           }
         }
       }
@@ -225,9 +269,18 @@ function search(idx, segs, opt) {
     return isNaN(c) ? 0.5 : c;
   };
   const versOf = (r) => new Set((idx.groups.get(r.group) ?? []).map((s) => s.source || "")).size;
-  res.sort((x, y) => x.total - y.total || okOf(x) - okOf(y) || confOf(y) - confOf(x) || versOf(y) - versOf(x) || y.exact - x.exact || (idx.pop.get(popKey(y.group)) || 0) - (idx.pop.get(popKey(x.group)) || 0) || (idx.hot.get(y.group) || 0) - (idx.hot.get(x.group) || 0) || // 并列: 歌手在库里谱多的先
-  y.secW - x.secW || // 段落权: 副歌/主歌 > 间奏 > 整曲 > 前奏/尾奏/发狂钢琴(用户选 B)
-  (BAD.test(x.group) ? 1 : 0) - (BAD.test(y.group) ? 1 : 0) || x.group.length - y.group.length || (x.group < y.group ? -1 : 1));
+  const keyed = res.map((r) => ({
+    r,
+    ok: okOf(r),
+    conf: confOf(r),
+    vers: versOf(r),
+    pop: idx.pop.get(popKey(r.group)) || 0,
+    hot: idx.hot.get(r.group) || 0,
+    bad: BAD.test(r.group) ? 1 : 0
+  }));
+  keyed.sort((a, b) => a.r.total - b.r.total || a.ok - b.ok || b.conf - a.conf || b.vers - a.vers || b.r.exact - a.r.exact || b.pop - a.pop || b.hot - a.hot || b.r.secW - a.r.secW || a.bad - b.bad || a.r.group.length - b.r.group.length || (a.r.group < b.r.group ? -1 : 1));
+  res.length = 0;
+  for (const k of keyed) res.push(k.r);
   const bestTotal = res.length ? res[0].total : 0;
   let groupsAtBest = 0;
   for (const r of res) if (r.total === bestTotal) groupsAtBest++;
@@ -282,6 +335,7 @@ function search(idx, segs, opt) {
 export {
   SEC_CN,
   SEC_W,
+  bestWindow,
   buildIndex,
   popKey,
   search,

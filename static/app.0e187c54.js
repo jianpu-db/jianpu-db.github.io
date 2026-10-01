@@ -1,4 +1,4 @@
-import { buildIndex, search } from "./search.650bfe33.js";
+import { buildIndex, search } from "./search.5d77702d.js";
 import { parseQuery, isPitch, show } from "./jptok.5bf64237.js";
 var REPO = "Francium-223/jianpu-db";
 var ROOT_URL = new URL("../", import.meta.url);

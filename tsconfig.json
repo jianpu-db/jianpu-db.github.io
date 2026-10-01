@@ -17,5 +17,5 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["static/**/*.ts"]
+  "include": ["static/jptok.ts", "static/search.ts"]
 }

@@ -1,0 +1,12 @@
+{
+  // 主界面文件（static/app.ts）的**过渡配置**: 它从 867 行 JS 迁过来，DOM 胶水层先宽松，
+  // 数据层已经给了真类型（见文件头"TypeScript 迁移状态"）。收紧到 strict 是下一步的活，
+  // 不假装已经做完 —— 严格模式仍覆盖 jptok / search / worker 三处（那才是口径与边缘逻辑）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["static/app.ts"]
+}

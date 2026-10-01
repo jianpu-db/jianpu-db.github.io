@@ -1,5 +1,35 @@
 import { buildIndex, search } from './search.js';
 import { parseQuery, parseToken, isPitch, show } from './jptok.js';
+import type { SearchResult, Index } from './search.js';
+/* 简谱旋律查歌 —— 主界面（路由 / 卡片 / 谱页 / 就地表单）
+
+ * ⚠ **TypeScript 迁移状态（2026-10-01, B 阶段）**:
+ *   文件已改成 `.ts`，构建链统一（`esbuild` 只做类型擦除）；**数据层是真类型**：
+ *     * `exactLinks(r: SearchResult, ctx?: string)` / `renderScore(...)` 的签名；
+ *     * `FIELDS`（schema 来的属性表）、`PLATFORMS`（收录页平台表）、`TXT`（文案表）。
+ *   **DOM 胶水层仍是宽松模式**（`tsconfig.app.json`: `strict: false`）—— 下一步收紧要修的是三类：
+ *     ① 事件处理器 / `$()` 取到的元素可能为 null（`?.` 或先断言）；
+ *     ② `FIELD_VALUE` 里每个渲染函数的参数要写成 `SearchResult`；
+ *     ③ 各处 `setTimeout`/`fetch` 回调的参数类型。
+ *   为什么不一口气上 strict: 867 行 DOM 代码逐条加类型噪声大、回归风险高，而收益主要在数据层 ——
+ *   宁可**分两步走且写在文件头**，也不假装已经 strict。
+ */
+
+/* ── 类型（数据层；DOM 胶水层留给后面的收紧）───────────────────────────────── */
+
+/** schema 里一条属性（`jianpu-db/schema.py` 的 FIELDS，经 stats.json 带过来） */
+interface Field {
+  label: Record<string, string>;
+  kind: string;
+  editable?: boolean;
+  hint?: string;
+  note?: string;
+  row?: boolean;
+}
+/** 收录页平台表一行: [站名, 认领正则, 粘确切页的提示, 搜索页模板] */
+type Platform = [string, RegExp, string, string];
+/** 卡片上的提示文案 */
+type TxtEntry = Record<string, string>;
 
 /* 数据侧: 只需要"曲名 + 出处" 就能给出可点的外链 —— 不依赖任何 API/key */
 var REPO = 'Francium-223/jianpu-db';
@@ -15,8 +45,32 @@ function appPath(rel) { return new URL(rel, ROOT_URL).pathname; }
 function tunePath(id) { return appPath('s/' + encodeURIComponent(id)); }
 
 
-function $(id) { return document.getElementById(id); }
-var IDX = null;
+
+/* 站点自己在构建时注入的全局（见 tools/build_dist.mjs: `JIANPU_API` / `JIANPU_READONLY`）。
+ * 声明一下，省得每处 `window.X` 都报 TS2339。 */
+declare global {
+  interface Window {
+    JIANPU_API?: string;
+    JIANPU_READONLY?: boolean;
+  }
+}
+
+/** 从事件目标往上找最近的祖先元素。
+ *
+ * 为什么要有它: `EventTarget` 上没有 `closest`，而事件委托全靠它 —— 原来每处都写成
+ * `ev.target && ev.target.closest ? ev.target.closest(sel) : null`，TS 下每处都报错。
+ * 收成一处断言，调用点也更短（老浏览器没有 closest 的情况仍然兜住）。
+ */
+function closestFrom<T extends Element = Element>(t: EventTarget | null, sel: string): T | null {
+  const el = t as Element | null;
+  return el && typeof el.closest === 'function' ? (el.closest(sel) as T | null) : null;
+}
+
+function $<T extends HTMLElement = HTMLElement>(id: string): T {
+  // 调用方按需要给泛型：`$<HTMLInputElement>('q')`。默认 HTMLElement（够用于 textContent/className）。
+  return document.getElementById(id) as T;
+}
+var IDX: Index | null = null;
 
 function loadCorpus() {
   if (typeof DecompressionStream === 'undefined') {
@@ -51,7 +105,9 @@ function sourceUrl(src) {
 }
 
 /* 站点标签: 从 URL 的 host 认(不靠人的命名习惯) */
-var SITE_LABELS = [
+/** [认领正则, 站名] —— 从 URL 的 host 认站，不靠人的命名习惯 */
+type SiteLabel = [RegExp, string];
+var SITE_LABELS: SiteLabel[] = [
   [/music\.163\.com/, '网易云音乐'],
   [/y\.qq\.com/, 'QQ音乐'],
   [/bilibili\.com/, 'B站'],
@@ -77,7 +133,7 @@ function siteLabel(u) {
  */
 // **单一真源在 `jianpu-db/schema.py` 的 PLATFORMS**(搜索页格式只写一处), 经 data/stats.json 带过来。
 // 下面这张只是"stats 还没加载 / 独立部署 web"时的兜底, 字段顺序: [名, 认领正则, 粘确切页的提示, 搜索页模板]
-var PLATFORMS = [
+var PLATFORMS: Platform[] = [
   ['网易云音乐', /music\.163\.com/, 'https://music.163.com/song?id=…', 'https://music.163.com/#/search/m/?s={q}&type=1'],
   ['QQ音乐', /y\.qq\.com/, 'https://y.qq.com/n/ryqq/songDetail/…', 'https://y.qq.com/n/ryqq/search?w={q}'],
   ['B站', /bilibili\.com/, 'https://www.bilibili.com/video/…', 'https://search.bilibili.com/all?keyword={q}'],
@@ -88,7 +144,7 @@ function loadPlatforms(st) {
   if (!st || !st.platforms || !st.platforms.length) return;
   try {
     PLATFORMS = st.platforms.map(function (p) {
-      return [p.name, new RegExp(p.host || '.', 'i'), p.exact || 'https://…', p.search || ''];
+      return [p.name, new RegExp(p.host || '.', 'i'), p.exact || 'https://…', p.search || ''] as Platform;
     });
   } catch (e) { /* 保持内建兜底 */ }
 }
@@ -102,7 +158,7 @@ var ALROW_N = 0;                       // 每张卡一个就地输入框, 用 id
  *      能改的行尾画一颗 ＋, 不能改的把 note 挂在 title 上(鼠标停一下能看到为什么)。
  * 下面这份兜底只在"stats 还没加载 / 独立部署 web"时用, 故意只留最小信息。
  */
-var FIELDS = {
+var FIELDS: Record<string, Field> = {
   file: { label: { zh: '文件', en: 'File' }, kind: 'readonly' },
   group: { label: { zh: '曲名', en: 'Title' }, kind: 'readonly' },
   artist: { label: { zh: '歌手', en: 'Artist' }, kind: 'list', editable: true, hint: '邓丽君（多个用逗号）' },
@@ -158,7 +214,7 @@ function collectedUrls(r) {
   return exactSources(r).map(function (p) { return p[1]; });
 }
 
-export function exactLinks(r, ctx) {
+export function exactLinks(r: SearchResult, ctx?: string): string {
   var out = exactSources(r);          // 与 collectedUrls 同一份口径
   var urls = collectedUrls(r);
   var f = (r.file && r.file[0]) || '';
@@ -243,7 +299,7 @@ function issueUrl(text) {
  */
 export /* 卡片上的**提示文案**(按语言)。与 schema 里的属性名一样, 文案不许散落在各处:
  * 这里集中一份, 按 LANG 取, 取不到回落 zh。 */
-var TXT = {
+var TXT: Record<string, TxtEntry> = {
   tied: { zh: '并列：另有 {n} 首同分', en: '{n} more song(s) tie at this cost' },
   tiedTip: { zh: '这句不是唯一命中 —— 后面并列的那几首要一起看, 别把第一条当铁证',
              en: 'not a unique match — check the tied results too' },
@@ -251,10 +307,12 @@ var TXT = {
   onlyOneTip: { zh: '这首歌在库里只有这一个版本, 而且是**机器转写**（没有第二个版本可交叉核对）',
                 en: 'only one version in the corpus, and it is machine-transcribed' },
 };
-function t(key, vars) {
+function t(key: string, vars?: Record<string, unknown>): string {
   var e = TXT[key] || {};
   var s = e[LANG] || e.zh || '';
-  return String(s).replace(/\{(\w+)\}/g, function (m, k) { return (vars && vars[k] != null) ? vars[k] : m; });
+  return String(s).replace(/\{(\w+)\}/g, function (m, k) {
+    return (vars && vars[k] != null) ? String(vars[k]) : m;
+  });
 }
 
 /* 「这条命中到底有多硬」的提示片子(2026-09-29 用户口径: 别让人把转写噪声当铁证)。
@@ -275,7 +333,7 @@ function cautionChips(r) {
 // ⚠ 2026-10-01 发现: 这个函数一直**没有** export，而 check_page 里写的是 `app.renderScore(...)`
 //   —— 于是那条自检从写下的那天起就没真正跑过（一直抛 `app.renderScore is not a function`，
 //   被脚本的 try/catch 包成"未捕获异常"打在最后）。做 TS 迁移时因为要改 import 方式才发现。
-export function renderScore(raw, at, qlen, bars) {
+export function renderScore(raw: string, at: number | null, qlen: number, bars: number[]): string {
   if (!raw) return '';
   var toks = raw.split(' ');
   var barSet = {};
@@ -309,11 +367,11 @@ export function renderScore(raw, at, qlen, bars) {
   return html.join('');
 }
 
-function run(e) {
+function run(e?: { preventDefault: () => void }) {
   if (e) e.preventDefault();
   if (!IDX) return;
   var segs = [];
-  var parts = $('q').value.split(/[;；|、+，,]+/);
+  var parts = $<HTMLInputElement>('q').value.split(/[;；|、+，,]+/);
   for (var i = 0; i < parts.length; i++) {
     var s = parseQuery(parts[i]);
     if (s.length >= 5) segs.push(s);
@@ -325,12 +383,12 @@ function run(e) {
   }
   $('status').className = 'status';
   $('status').textContent = '查询中…';
-  $('go').disabled = true;
+  $<HTMLButtonElement>('go').disabled = true;
   setTimeout(function () {
     var t0 = performance.now();
     var res = search(IDX, segs, { top: 10 });
     render(segs, res, Math.round(performance.now() - t0));
-    $('go').disabled = false;
+    $<HTMLButtonElement>('go').disabled = false;
   }, 20);
 }
 
@@ -403,7 +461,7 @@ function metaRows(r) {
   var h = { esc: esc, list: list };
   var rows = [];
   Object.keys(FIELDS).forEach(function (key) {
-    var f = FIELDS[key] || {};
+    var f = FIELDS[key];
     if (f.row === false) return;                       // 如"收录页": 它在卡片顶部是片子, 不做表格行
     var render = FIELD_VALUE[key];
     var val = render ? render(r, h) : '—';
@@ -427,7 +485,7 @@ function metaRows(r) {
  *      也认 `#/s/<id>` —— 纯静态托管(没有 SPA 回退)时用这个形式照样能打开。
  * id 是 build_web_data.py 里 tune_id() 定的(首选 source), 前端只查表, 不重算。
  */
-var CURRENT_TUNE = '';
+var CURRENT_TUNE: string = '';
 
 function tuneIdFromLocation() {
   var p = location.pathname || '';
@@ -451,10 +509,10 @@ function showHome(q) {
   CURRENT_TUNE = '';
   document.title = 'jianpu-db | 通过简谱旋律查歌';
   if (q) {                                   // ?q=… -> 直接替用户查一次(谱页上的"用开头几个音检索"用它)
-    $('q').value = q;
+    $<HTMLInputElement>('q').value = q;
     run({ preventDefault: function () {} });
-  } else if ($('q')) {
-    $('q').focus();
+  } else if ($<HTMLInputElement>('q')) {
+    $<HTMLInputElement>('q').focus();
   }
 }
 
@@ -589,7 +647,7 @@ function render(segs, res, ms) {
   var nf = '<p class="nf">找不到？<a class="nf-add" href="#sform">欢迎补充。</a></p>';
   if (!res.length) {
     $('status').textContent = '没找到匹配（' + ms + ' 毫秒）。片段至少 5 个音；换更长的片段试试。';
-    $('out').innerHTML = nf + '<p class="hint">如果确认库里应该没有这首歌，也可以直接提 issue：' +
+    $<HTMLInputElement>('out').innerHTML = nf + '<p class="hint">如果确认库里应该没有这首歌，也可以直接提 issue：' +
       '<span class="links"><a class="add" href="' + issueUrl(qshow) + '" target="_blank" rel="noopener">＋ 建议收录</a></span></p>';
     return;
   }
@@ -624,7 +682,7 @@ function render(segs, res, ms) {
         'title="库里这首有问题 / 想补充资料 → 一键提 issue">＋ 反馈/补充</a>' +
       '</div></div>';
   }
-  $('out').innerHTML = nf + html +
+  $<HTMLInputElement>('out').innerHTML = nf + html +
     '<p class="hint">「记号」是升降号一致的音数。' +
     '<b>收录页</b>是这首歌在该站的具体页面。</p>';
 }
@@ -673,7 +731,7 @@ function renderTitle(list, q) {
   $('tout').innerHTML = html;
 }
 
-function rerunTitle() { renderTitle(titleSearch($('tq').value), $('tq').value); }
+function rerunTitle() { renderTitle(titleSearch($<HTMLInputElement>('tq').value), $<HTMLInputElement>('tq').value); }
 if ($('tform')) {
   $('tform').addEventListener('submit', function (ev) {
     ev.preventDefault();
@@ -686,40 +744,40 @@ if ($('tform')) {
 document.addEventListener('click', function (ev) {
   // 「每谱一页」的链接: 应用内跳转(不整页刷新, 也不新开标签)
   // "找不到？欢迎补充。": 跳到投稿表单时顺手预选类型/填好刚敲的旋律
-  var nfa = ev.target && ev.target.closest ? ev.target.closest('a.nf-add') : null;
+  var nfa = closestFrom<HTMLElement>(ev.target, 'a.nf-add');
   if (nfa) {
-    var kd = $('skind'), sc = $('sscore');
+    var kd = $<HTMLInputElement>('skind'), sc = $<HTMLInputElement>('sscore');
     if (kd) kd.value = 'new';
     if (sc && !sc.value) sc.value = QUERY_DIGITS;
-    var st = $('stitle');
+    var st = $<HTMLInputElement>('stitle');
     if (st) setTimeout(function () { st.focus(); }, 0);
     return;                      // 锚点自己会滚过去, 别拦
   }
-  var tl = ev.target && ev.target.closest ? ev.target.closest('a.tune') : null;
+  var tl = closestFrom<HTMLElement>(ev.target, 'a.tune');
   if (tl) {
     ev.preventDefault();
     navigate(tl.getAttribute('href'));
     return;
   }
   // 圆形 ＋: 就地展开这一张卡的输入框, 并按平台给占位提示
-  var pb = ev.target && ev.target.closest ? ev.target.closest('.plus') : null;
+  var pb = closestFrom<HTMLElement>(ev.target, '.plus');
   if (pb) {
     var row = document.getElementById(pb.getAttribute('data-row'));
     if (row) {
       row.hidden = false;
-      var pin = row.querySelector('.al-url');
-      if (pin) { pin.placeholder = pb.getAttribute('data-ph') || 'https://…'; pin.focus(); }
+      var pin = row.querySelector('.al-url') as HTMLInputElement | null;
+      if (pin) { (pin as HTMLInputElement).placeholder = pb.getAttribute('data-ph') || 'https://…'; (pin as HTMLInputElement).focus(); }
       var pm = row.querySelector('.al-msg');
       if (pm) { pm.textContent = ''; pm.className = 'al-msg'; }
     }
     return;
   }
   // 「＋ 补标签」
-  var tb = ev.target && ev.target.closest ? ev.target.closest('.al-go-tags') : null;
+  var tb = closestFrom<HTMLButtonElement>(ev.target, '.al-go-tags');
   if (tb) {
     var tbox = tb.closest('.addlink');
-    var tin = tbox.querySelector('.at-tags');
-    var tmsg = tbox.querySelector('.al-msg');
+    var tin = tbox.querySelector('.at-tags') as HTMLInputElement;
+    var tmsg = tbox.querySelector('.al-msg') as HTMLElement;
     var tags = (tin.value || '').trim();
     if (!tags) { tmsg.className = 'al-msg err'; tmsg.textContent = '先填标签'; return; }
     if (READONLY) { readonlyInto(tmsg); return; }        // 只读镜像: 别发一个必 404 的请求
@@ -743,11 +801,11 @@ document.addEventListener('click', function (ev) {
     return;
   }
   // 「＋ 补 <属性>」: 卡片元数据行尾那颗 ＋ —— **哪些属性可改由 schema.py 决定**(前端只是照做)
-  var ab = ev.target && ev.target.closest ? ev.target.closest('.al-go-attr') : null;
+  var ab = closestFrom<HTMLButtonElement>(ev.target, '.al-go-attr');
   if (ab) {
     var abox = ab.closest('.alrow');
-    var ain = abox.querySelector('.attr-val');
-    var amsg = abox.querySelector('.al-msg');
+    var ain = abox.querySelector('.attr-val') as HTMLInputElement;
+    var amsg = abox.querySelector('.al-msg') as HTMLElement;
     var aval = (ain.value || '').trim();
     if (!aval) { amsg.className = 'al-msg err'; amsg.textContent = '先填内容'; return; }
     if (READONLY) { readonlyInto(amsg); return; }
@@ -778,11 +836,11 @@ document.addEventListener('click', function (ev) {
     }).catch(function (e) { ab.disabled = false; amsg.className = 'al-msg err'; amsg.textContent = '失败：' + e.message; });
     return;
   }
-  var b = ev.target && ev.target.closest ? ev.target.closest('.al-go') : null;
+  var b = closestFrom<HTMLButtonElement>(ev.target, '.al-go');
   if (!b) return;
   var box = b.closest('.addlink');
-  var inp = box.querySelector('.al-url');
-  var msg = box.querySelector('.al-msg');
+  var inp = box.querySelector('.al-url') as HTMLInputElement;
+  var msg = box.querySelector('.al-msg') as HTMLElement;
   var url = (inp.value || '').trim();
   if (!url) { msg.className = 'al-msg err'; msg.textContent = '先粘贴网址'; return; }
   if (READONLY) { readonlyInto(msg); return; }          // 同上
@@ -824,7 +882,7 @@ var exs = document.getElementsByClassName('ex');
 for (var i = 0; i < exs.length; i++) {
   exs[i].addEventListener('click', function (ev) {
     ev.preventDefault();
-    $('q').value = this.getAttribute('data-q');
+    $<HTMLInputElement>('q').value = this.getAttribute('data-q');
     run();
   });
 }
@@ -848,32 +906,32 @@ function readonlyInto(el) {
 var LAST = '', LASTFILE = '';   // 供「投稿」表单: 曲名 + 刚查的那一份曲谱文件
 
 function submit() {
-  var t = $('stitle').value.trim();
+  var t = $<HTMLInputElement>('stitle').value.trim();
   if (!t) { $('sstatus').className = 'status err'; $('sstatus').textContent = '请填曲名。'; return; }
   if (READONLY) { readonlyInto($('sstatus')); return; }
-  var kind = $('skind').value;
+  var kind = $<HTMLInputElement>('skind').value;
   var body = {
     kind: kind, title: t,
-    score: $('sscore').value.trim(), note: $('snote').value.trim(),
-    contact: $('scontact').value.trim(),
+    score: $<HTMLInputElement>('sscore').value.trim(), note: $<HTMLInputElement>('snote').value.trim(),
+    contact: $<HTMLInputElement>('scontact').value.trim(),
     // 纠错/元数据: 带上刚才查的那一份, 作者不用猜你说的是哪份
     file: (kind === 'fix' || kind === 'meta') ? LASTFILE : ''
   };
   $('sstatus').className = 'status';
   $('sstatus').textContent = '提交中…';
-  $('sgo').disabled = true;
+  $<HTMLButtonElement>('sgo').disabled = true;
   fetch(API + '/api/submit', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   }).then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
     .then(function (x) {
-      $('sgo').disabled = false;
+      $<HTMLButtonElement>('sgo').disabled = false;
       if (x.j && x.j.ok) {
         $('sstatus').textContent = '已收到，编号 ' + x.j.id +
           (x.j.score_file ? '（已生成曲谱 ' + x.j.score_file + ' 入库' +
             (x.j.refresh ? '，索引重建中，约 2 分钟后可搜到' : '') + '）'
             : '（只留了投稿，没有数字）') +
           (x.j.score_warn ? '　⚠ ' + x.j.score_warn : '');
-        $('stitle').value = ''; $('sscore').value = ''; $('snote').value = '';
+        $<HTMLInputElement>('stitle').value = ''; $<HTMLInputElement>('sscore').value = ''; $<HTMLInputElement>('snote').value = '';
       } else {
         $('sstatus').className = 'status err';
         $('sstatus').textContent = '提交失败：' + ((x.j && x.j.err) || ('HTTP ' + x.s)) +
@@ -882,7 +940,7 @@ function submit() {
       }
     })
     .catch(function (e) {
-      $('sgo').disabled = false;
+      $<HTMLButtonElement>('sgo').disabled = false;
       $('sstatus').className = 'status err';
       $('sstatus').innerHTML = '连不上投稿服务（' + e.message + '）。也可以提 ' +
         '<a href="' + issueUrl(t) + '" target="_blank" rel="noopener">Issue</a>';
@@ -895,8 +953,8 @@ if (READONLY) {           // 表单还在, 但先把话说清楚 —— 免得�
     '<p class="lead" id="ro-note">⚠ 只读镜像：查歌、谱页可用；投稿请到 ' +
     '<a href="' + MIRROR + '" target="_blank" rel="noopener">jianpu-db.org</a>。</p>');
 }
-$('sfill').addEventListener('click', function () {
-  if (LAST) { $('stitle').value = LAST; }
+$<HTMLButtonElement>('sfill').addEventListener('click', function () {
+  if (LAST) { $<HTMLInputElement>('stitle').value = LAST; }
   else { $('sstatus').textContent = '先在上面查一次，再点这个按钮。'; }
 });
 

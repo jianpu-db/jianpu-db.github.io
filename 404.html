@@ -38,7 +38,7 @@
 <!-- 站标: 内联 SVG(数字 123 就是简谱的样子), 免得再加一个请求 -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b62c4'/%3E%3Ctext x='32' y='45' font-family='Helvetica,Arial' font-size='34' font-weight='bold' fill='white' text-anchor='middle'%3E123%3C/text%3E%3C/svg%3E">
 <!-- ⚠ 这一小段必须留在**最前面**, 而且必须是内联的(不能搬进 app.js)。
-     为什么: 谱页的地址是 `/s/<id>`, 在这个地址上相对路径 `./static/app.a13439c7.js` 会被浏览器解析成
+     为什么: 谱页的地址是 `/s/<id>`, 在这个地址上相对路径 `./static/app.77a5f26b.js` 会被浏览器解析成
      `/s/static/app.js`(404) -> 深链/刷新整片白屏(2026-09-24 实测)。这里按"文档地址 = 应用根 +
      可能是 s/<id>"把 <base> 摆正, 后面所有相对路径就都对得上了; 部署到子目录
      (如 user.github.io/jianpu-web/) 也照样对 —— 不用按部署位置改 HTML。 -->
@@ -133,6 +133,6 @@
   <datalist id="taglist"></datalist>
 
 </div>
-<script src="./static/app.a13439c7.js" type="module"></script>
+<script src="./static/app.77a5f26b.js" type="module"></script>
 </body>
 </html>

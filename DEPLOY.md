@@ -176,3 +176,17 @@ node tools/check_jptok_js.mjs  # 前端 token 口径与 Python 侧一致
 
 线上核对（换域名后照样适用）：`stats.json` 的 `songs` 要和语料行数一致、`fields` 是 15 个、
 首页引用的 `static/app.<hash>.js` 必须能从线上取回。
+
+### 已知瞬时故障：`actions/deploy-pages@v4` 偶发失败（2026-10-02 实测）
+
+**现象**：`Deploy to GitHub Pages` 这次 run 里 `build` 成功、`deploy` 失败，失败步骤是
+`Run actions/deploy-pages@v4`；紧接着的下一次 run 全绿。
+
+**结论**：这是 GitHub 侧那个 action/服务的**瞬时故障**（短时间连推多个提交时更容易遇到，
+因为部署会排队），不是仓库代码或配置问题。两个旁证：
+* `pages.yml` 里 `concurrency: group: pages` 与 GitHub 内建 Pages 工作流**同组**（会排队），
+  且 `cancel-in-progress: false` 是刻意的 —— 取消会在 Actions 列表里留个红叉，看着像失败；
+* 同一批提交里 `checks` 与 `pages build and deployment` 都是 success，`build` 步骤也成功。
+
+**怎么办**：看下一条 run 的结论；仍是失败再查（先看 `build` 是否绿 —— build 绿说明产物没问题）。
+别因为一个红叉就去改构建脚本。

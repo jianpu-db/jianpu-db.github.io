@@ -28,6 +28,7 @@
 | [docs/TECH_STACK.md](docs/TECH_STACK.md) | 分层选型与**理由 + 量化收益**、"刻意没用"的清单、6 个难题的 STAR 复盘、20 条面试 Q&A |
 | [docs/QA.md](docs/QA.md) | **质量工程**：自检怎么跑、判据用什么证据、什么时候不能跑 |
 | [docs/交付总结.md](docs/交付总结.md) | **交付总结**：五个阶段做了什么、实测数字、以及被数据否决的尝试 |
+| [docs/MOCK_INTERVIEW.md](docs/MOCK_INTERVIEW.md) | **面试演练稿**：自我介绍 + 10 个追问 + 陷阱题 + 数字速查 |
 | [docs/RESUME.md](docs/RESUME.md) | 中英文简历要点（可直接抄）+ 需提前准备的追问 |
 | [DEPLOY.md](DEPLOY.md) | 域名/边缘/隧道/写后端的部署手册与踩坑记录 |
 

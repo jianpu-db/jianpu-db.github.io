@@ -5,7 +5,7 @@
   "description": "简谱旋律查歌 —— 前端 TypeScript（零运行时依赖的 ES module，esbuild 只做类型擦除）+ Cloudflare Workers / GitHub Pages 两条部署包装",
   "scripts": {
     "build": "node tools/build_dist.mjs",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "bench": "node tools/bench_search.mjs 40",
     "build:gh": "node tools/build_dist.mjs --target gh",
     "dev": "npm run build && wrangler dev",

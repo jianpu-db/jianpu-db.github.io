@@ -9,12 +9,13 @@
 //   ④ 没有这首 / 没有曲名 / html 为空 -> **原样返回**（绝不把谱页弄坏）；
 //   ⑤ 正文（`<body>` 之后）一个字节都不动。
 import { readFileSync } from 'node:fs';
+import { importRepoFile } from './_built.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { injectSongMeta, httpsRedirectUrl } = await import(
-  'file://' + join(ROOT, 'worker', 'index.js').replace(/\\/g, '/'));
+// B 阶段: Worker 也是 TypeScript 了 —— 走 `_built.mjs` 的通用入口按需转译（与线上同一份源码）
+const { injectSongMeta, httpsRedirectUrl } = await importRepoFile('worker/index.ts');
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fail++; };

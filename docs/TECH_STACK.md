@@ -50,6 +50,8 @@
 | 技术 | 为什么 | 收益 / 坑 |
 |---|---|---|
 | **Cloudflare Workers + Assets** | 读路径要"零运维 + 全球边缘" | 免费额度内；`_headers` 做内容寻址长缓存 |
+| **Worker 用 TypeScript**（2026-10-01） | 边缘代码负责路由/鉴权/注入，出错就是"整站不可用"；类型能挡住一整类错误 | 入口 `worker/index.ts`（`wrangler` 自己 esbuild 打包）；单独 `tsconfig.worker.json`（`@cloudflare/workers-types`，不能和 DOM lib 混） |
+| **`/api/health` 探上游（`upstreamOk`）** | 快速隧道会**悄悄死掉**而 secret 仍在 —— 只报 `api:true` 会骗人 | 2026-10-01 实测: 隧道 `Error 1016`，health 却一直 `api:true`，看护几小时没报；现在健康检查真去敲一下上游（3 s 超时） |
 | **`assets.run_worker_first`** | `/s/<id>` 靠 SPA 回退，默认**不过 Worker** | 不设它 → 每谱注入**静默失效**（页面照常打开） |
 | **每谱注入 meta（Edge SSR-lite）** | 爬虫不跑 JS；1.1 万个谱页否则"同一份 HTML" | `data/og.json` 11,495 条，`/s/<id>` 各有 `<title>`/OG/canonical |
 | **Cloudflare Tunnel + 本机写服务** | 写盘/`git commit` 必须在本机；但读要边缘 | 边缘反代 + `X-Token`；`vars` 与 `secret` 同名会报 **code 10053** |
@@ -113,6 +115,16 @@
   * 性能：索引就绪 **204 → 201 ms**，查询中位 **151 → 138.7 ms**（无回退）；
   * **抓到三个静默问题**：① `buildIndex` 的字段白名单漏了 `conf`/`confP10` → "按转写置信度优先"这条并列依据一直拿到 0.5（等于没生效）、卡片上也永远不显示置信度（本项目**第 5 次**栽在"白名单式字段复制"上，现在有回归断言盯着）；② `app.renderScore` 从来没有 `export`，而 `check_page.mjs` 里写的是 `app.renderScore(...)` → 那条自检**从写下那天起就没通过过**；③ `check_tune.mjs` 断言字面量 `<th>歌手</th>`，而 schema 化之后表头是 `<th><span title=…>歌手</span></th>` → **永远不可能通过**；
   * 构建脚本自己也有一个：拼 `.ts` 时忘了去扩展名（找 `jptok.js.ts`）→ 静默少两个产物文件。已改成"缺文件即构建失败"。
+
+### 8. 隧道悄悄死了，而监控说"一切正常"（可观测性那一课）
+
+* **S**：线上投稿忽然全挂 —— Cloudflare 回 `Error 1016 Origin DNS error`（快速隧道域名解析不到）。
+* **A**：先重建隧道恢复服务；再改**判据**：`/api/health` 增加真去敲上游的 `upstreamOk`（3 s 超时），
+  看护脚本从"看 `api`（＝secret 配了没）"改成"看 `api && upstreamOk`"。
+* **R**：一条 `curl https://jianpu-db.org/api/health` 现在能区分"没配"和"配了但对方死了"；
+  **教训：监控不能只查配置在不在，要查上游活不活。** 同一天我加的"GPU 让路闸"也自锁过一次
+  （计划任务的子进程查到"自己在 Running"于是永远等），同样用"上限兜底 + 环境标记"修掉 —— 两件事一个道理：
+  **任何"等待/健康判断"都必须有退路。**
 
 ## 五、常见追问与答法（面试 Q&A）
 

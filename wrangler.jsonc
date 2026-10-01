@@ -5,7 +5,7 @@
   // 构建:  npm run build               (= node tools/build_dist.mjs, 只拼静态资源, 不需要 Python)
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "jianpu-web",
-  "main": "worker/index.js",
+  "main": "worker/index.ts",   // B 阶段: 入口是 TypeScript(wrangler 用 esbuild 打包, 无需额外步骤)
   "compatibility_date": "2026-09-01",
   "assets": {
     "directory": "./dist",

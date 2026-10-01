@@ -10,7 +10,7 @@
 // 行为保证：转译**只做类型擦除**（`loader: 'ts'`、`format: 'esm'`、target 与浏览器一致），
 // 不改语义 —— 所以"检查脚本测的就是线上跑的那份逻辑"。
 import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { transform } from 'esbuild';
 
@@ -49,5 +49,24 @@ export async function transpile(name) {
 /** `await importStatic('search')` —— 拿到转译后的模块（缓存目录在 static/.build/，已 gitignore）。 */
 export async function importStatic(name) {
   const out = await transpile(name);
+  return import(pathToFileURL(out).href);
+}
+
+/** 转译并载入仓库里**任意** `.ts`（例如 `worker/index.ts`）—— 给检查脚本用。
+ *
+ * 为什么要通用入口: Worker 也上了 TypeScript，而它不在 `static/` 下；路径与缓存目录都跟着源文件走
+ * （产物落在同目录的 `.build/` 下），这样它内部的相对 import（如果有）也照样解析得对。
+ */
+export async function importRepoFile(rel) {
+  const src = join(ROOT, rel);
+  if (!existsSync(src)) throw new Error(`找不到源文件: ${rel}`);
+  const outDir = join(dirname(src), '.build');
+  mkdirSync(outDir, { recursive: true });
+  const out = join(outDir, basename(src).replace(/\.ts$/, '.js'));
+  if (!existsSync(out) || statSync(out).mtimeMs < statSync(src).mtimeMs) {
+    const code = readFileSync(src, 'utf8');
+    const res = await transform(code, { ...TS_OPTS, sourcefile: src });
+    writeFileSync(out, res.code);
+  }
   return import(pathToFileURL(out).href);
 }

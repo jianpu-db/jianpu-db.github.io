@@ -59,7 +59,19 @@ jobs:
       - name: UI 检查
         run: node tools/check_ui.mjs
       - name: 深链（每谱一页）
-        run: node tools/check_tune.mjs http://127.0.0.1:8770
+        # 失败时把关键几行做成 **annotation**：CI 日志要登录才能读，而注解是公开 API 就能取到的
+        # （这次排查 node22 上 check_tune 失败，就是卡在"看不到日志"上）。
+        run: |
+          set +e
+          node tools/check_tune.mjs http://127.0.0.1:8770 > /tmp/tune.log 2>&1
+          rc=$?
+          cat /tmp/tune.log
+          if [ "$rc" -ne 0 ]; then
+            grep -E '✗|!|Error|error|TypeError|ReferenceError' /tmp/tune.log | tail -6 | while read -r line; do
+              echo "::error title=check_tune::$line"
+            done
+          fi
+          exit "$rc"
       - name: 高亮 + 收录页
         run: node tools/check_page.mjs http://127.0.0.1:8770
       - name: token 解析互锁（Python↔JS 口径；缺工具仓库的期望值时明确跳过）
@@ -78,9 +90,12 @@ jobs:
         python: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      # v5 的 Post 步骤（缓存收尾）在 runner 上失败过 -> 升 v6 并**关掉缓存**（本流水线不靠缓存提速，
+      # 但一个"Post Run 失败"会把整个 job 标红，让人误以为测试没过）。
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
+          enable-cache: false
       - name: 装依赖（uv.lock 钉死）
         run: uv sync --extra dev
       - name: ruff + mypy 门槛（新代码）

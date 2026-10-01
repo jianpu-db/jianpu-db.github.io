@@ -22,6 +22,17 @@ run node tools/check_ui.mjs "$URL"
 run node tools/check_tune.mjs "$URL"
 run node tools/check_live.mjs "$URL"
 run python3 tools/check_docs_numbers.py       # 文档里的数字必须与语料实测一致(简历材料别对不上账)
+# 这三条**不依赖本地服务**（纯算/纯 import），所以放这儿也不会被端口问题牵连:
+#   * 剪枝等价性: 同一批查询"开/关 ngram 剪枝"的最终卡片必须逐条相同（60 条含模糊与多段）
+#   * TS↔Wasm 对拍: 逐首 (cost, at) + 端到端结果（缺工具仓库产物时脚本会明确跳过）
+#   * Worker 路由: 缺失资源必须 404、页面路由仍兜底 index.html
+#     —— 本地静态服务走不到 SPA 兜底那条路，这条只能靠直接 import worker 来测
+run node tools/check_prune_parity.mjs 60
+run node tools/check_wasm_parity.mjs
+run node tools/check_worker_routes.mjs
+# 归组重复是**报告**不是门槛（它报的是"用户可见的重复"，那是产品决策不是 bug），所以只打印:
+echo; echo "=== 归组重复报告（非门槛）==="
+node tools/check_dup_groups.mjs 2>&1 | tail -n 6
 # 前端 jptok.js 与 Python 侧 jptok.py 的**token 口径**等价性(第三份口径的锁, 见 check_jptok_parity.sh)。
 # 需要 jianpu2/jianpu-db 就在旁边; 扫全语料约 30s, JIANPU_QUICK=1 时跳过。
 ROOT="$(dirname "$WEB")"

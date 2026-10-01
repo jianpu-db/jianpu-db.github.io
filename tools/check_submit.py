@@ -112,7 +112,12 @@ def test_write_into_score(m, tmp):
     旋律没坏(509 个音高音不变), 但"读者能往标签里塞任意内容"就是没校验干净。
     """
     if m.linkurl is None:
-        ok(False, "linkurl 没加载, 跳过写盘测试")
+        # ⚠ 2026-10-01 修（CI 上红的四处之一）: 原来这里调的是 `ok(False, ...)` —— 把"跳过"记成了
+        #   **失败**。`linkurl.py` 住在**语料仓库**里，CI 只 checkout 本站点仓库，所以它必然缺失；
+        #   于是这条自检在 CI 上永远红，而它其实什么代码问题都没说明。
+        #   规矩和 `check_docs_numbers.py` 一样: **跨仓库依赖缺失 -> 明确跳过 + 告诉人去哪跑**。
+        print("  (跳过写盘测试：没加载到 linkurl.py —— 它住在语料仓库里，"
+              "这一项要在有语料的机器上跑: JIANPU_DB=<语料库> py -3.13 tools/check_submit.py)")
         return
     src = os.path.join(m.DB, "scores", "th10_06.txt")
     if not os.path.isfile(src):

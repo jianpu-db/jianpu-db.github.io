@@ -11,9 +11,20 @@
 // duration_letter / beat 是否一致, 不一致就退非 0 并打印例子。
 import { importStatic } from './_built.mjs';
 const { parseToken, isPitch, beat } = await importStatic('jptok');
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
+// ⚠ 2026-10-01 修（CI 上红的四处之一）: 期望值来自**另一个仓库**
+//   （`jianpu2/tools/dump_jptok_tokens.py` 生成的 token 表），而 CI 只 checkout 本站点仓库。
+//   原来找不到文件就直接异常 -> 被读成"代码坏了"。**跨仓库依赖缺失要明确跳过**（与
+//   `check_docs_numbers.py` 同一套纪律），否则红叉会训练人忽略真问题。
 const path = process.argv[2] || 'D:/Documents_D/jianpu2/train-work/jptok_tokens.tsv';
+if (!existsSync(path)) {
+  console.log(`跳过：找不到 Python 侧的 token 表（${path}）`);
+  console.log('  这个检查锁的是"JS 与 Python 两份 jptok 口径逐 token 一致"，需要先在**工具仓库**生成期望值:');
+  console.log('    py -3.13 jianpu2/tools/dump_jptok_tokens.py');
+  console.log('  然后: node tools/check_jptok_js.mjs jianpu2/train-work/jptok_tokens.tsv');
+  process.exit(0);
+}
 const lines = readFileSync(path, 'utf8').split('\n').filter((l) => l.trim());
 const head = lines.shift();
 if (!head || !head.startsWith('token\t')) {

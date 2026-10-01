@@ -50,6 +50,20 @@ global.DecompressionStream = (await import('node:stream/web')).DecompressionStre
 process.on('unhandledRejection', (e) => { console.error('!! 未处理的 Promise 拒绝:', e && e.message); process.exitCode = 1; });
 process.on('uncaughtException', (e) => { console.error('!! 未捕获异常:', e && e.message); process.exitCode = 1; });
 
+// ── 固定 UI 语言（2026-10-01 修）────────────────────────────────────────────────
+// app.ts 用 `navigator.language` 决定界面语言（标签"歌手/状态"还是 "Artist/Status"），
+// 而**每台机器的语言不同**: 本机是 ja-JP（回落中文，所以本地一直绿），CI runner 是 en-US
+// （渲染成英文）-> 断言里写的中文标签就挂了。**测试不能依赖运行环境的语言**，这里钉死 zh-CN。
+// （排查过程: 公开 API 读不到 CI 日志 -> 给工作流加了"失败时把关键行做成 annotation"，
+//   一眼就看到了 `✗ 元数据表完整(歌手/状态都在)`。）
+try {
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { language: 'zh-CN', languages: ['zh-CN'] }, configurable: true, writable: true,
+  });
+} catch {
+  try { globalThis.navigator = { language: 'zh-CN', languages: ['zh-CN'] }; } catch { /* 忽略 */ }
+}
+
 await importStatic('app');
 // 等 **app 把索引建好**（信号: 它建完索引会调 fillTagList() 把标签灌进 #taglist 的 innerHTML），
 // 而不是睡一个固定 1200 ms —— 固定睡眠在 CI 上会随机红（见 tools/_wait.mjs 顶部说明）。

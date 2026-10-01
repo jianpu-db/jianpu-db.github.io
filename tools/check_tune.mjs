@@ -62,6 +62,18 @@ process.on('unhandledRejection', (e) => errors.push('未处理的 Promise 拒绝
 process.on('uncaughtException', (e) => errors.push('未捕获异常: ' + (e && e.message)));
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ── 固定 UI 语言（2026-10-01 修）──────────────────────────────────────────────
+// app.ts 用 `navigator.language` 决定界面语言：本机 ja-JP 回落中文（所以本地一直绿），
+// CI runner 是 en-US -> 标签渲染成 Artist/Status -> 断言里写的中文标签就挂了。
+// **测试不能依赖运行环境的语言**，钉死 zh-CN。（CI 日志读不到，是靠给工作流加"失败即注解"
+// 才一眼看到 `✗ 元数据表完整(歌手/状态都在)`。）
+try {
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { language: 'zh-CN', languages: ['zh-CN'] }, configurable: true, writable: true,
+  });
+} catch {
+  try { globalThis.navigator = { language: 'zh-CN', languages: ['zh-CN'] }; } catch { /* 忽略 */ }
+}
 await importStatic('app');
 
 /** 等"谱页真的渲出来"，而不是睡一个固定秒数。

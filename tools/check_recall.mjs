@@ -70,7 +70,13 @@ for (const name of names) {
     // 并列下界: 同代价的组里按组名排序，目标排第几
     const tied = res.filter((r) => r.cost === minCost).map((r) => r.group).sort();
     const lower = tied.indexOf(name);
-    rows.push({ name, strict: strict < 0 ? 999 : strict + 1, lower: lower < 0 ? 999 : lower + 1, tieSize: tied.length, minCost });
+    // **并列乐观口径**（= 离线 Python 评测的 rank 规则: 同代价时把目标排最前）——
+    // 加它是因为离线口径 L=11 报 100%、而产品口径只报 90.7%，差异必须**量出来**而不是猜:
+    // 这样就能把"并列策略造成的差"与"索引/采样造成的差"分开看。
+    const strictlyBetter = res.filter((r) => r.cost < minCost).length;
+    const optimistic = tied.includes(name) ? strictlyBetter + 1 : 999;
+    rows.push({ name, strict: strict < 0 ? 999 : strict + 1, lower: lower < 0 ? 999 : lower + 1,
+                optimistic, tieSize: tied.length, minCost });
   }
 }
 
@@ -79,6 +85,7 @@ const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 console.log(`基准 ${names.length} 首（可用 ${new Set(rows.map((r) => r.name)).size} 首，找不到谱 ${noSource} 首，查询无效 ${noQuery}）· L=${L} 错音=${ERR} · 共 ${rows.length} 次查询`);
 console.log(`  **strict**  Top1 ${(rate('strict', 1) * 100).toFixed(1)}%  Top3 ${(rate('strict', 3) * 100).toFixed(1)}%  Top5 ${(rate('strict', 5) * 100).toFixed(1)}%`);
 console.log(`  **并列下界** Top1 ${(rate('lower', 1) * 100).toFixed(1)}%  Top3 ${(rate('lower', 3) * 100).toFixed(1)}%  Top5 ${(rate('lower', 5) * 100).toFixed(1)}%`);
+console.log(`  **并列乐观** Top1 ${(rate('optimistic', 1) * 100).toFixed(1)}%   ← 这一列才对得上离线 Python 口径（它把目标排最前）`);
 console.log(`  同代价组均值 ${mean(rows.map((r) => r.tieSize)).toFixed(1)}（越大说明并列越多，strict 名次越不稳）`);
 const miss = rows.filter((r) => r.strict > 5);
 if (miss.length) {

@@ -21,6 +21,7 @@ run node tools/check_search.mjs "$URL"
 run node tools/check_ui.mjs "$URL"
 run node tools/check_tune.mjs "$URL"
 run node tools/check_live.mjs "$URL"
+run python3 tools/check_docs_numbers.py       # 文档里的数字必须与语料实测一致(简历材料别对不上账)
 # 前端 jptok.js 与 Python 侧 jptok.py 的**token 口径**等价性(第三份口径的锁, 见 check_jptok_parity.sh)。
 # 需要 jianpu2/jianpu-db 就在旁边; 扫全语料约 30s, JIANPU_QUICK=1 时跳过。
 ROOT="$(dirname "$WEB")"

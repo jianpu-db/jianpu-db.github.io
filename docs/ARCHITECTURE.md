@@ -25,7 +25,7 @@ flowchart TB
 
   subgraph CORPUS["语料仓库（git: jianpu-db）"]
     SCORES["scores/*.txt<br/>11,991 份"]
-    JSONL["data.jsonl<br/>11,495 首 · 253 万音符"]
+    JSONL["data.jsonl<br/>11,495 首 · 2,532,332 音符"]
     CONV --> SCORES --> JSONL
   end
 

@@ -78,6 +78,8 @@ jobs:
         run: node tools/check_jptok_js.mjs
       - name: 分享卡元数据检查
         run: node tools/check_og_meta.mjs
+      - name: Worker 路由（缺失资源必须 404, 页面路由仍兜底 index.html）
+        run: node tools/check_worker_routes.mjs
       - name: ngram 剪枝等价性（结果必须与全扫逐条相同）
         run: node tools/check_prune_parity.mjs 40
       - name: wasm 逐首/端到端对拍（缺工具仓库产物时明确跳过）

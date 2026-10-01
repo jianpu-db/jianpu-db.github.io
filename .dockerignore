@@ -1,0 +1,27 @@
+# 构建镜像时**不该进上下文**的东西（都很大，而且都不该烤进镜像）
+.git
+.gitignore
+.github
+# 语料是挂卷进来的，不是烤进来的
+corpus
+data/songs.jsonl.gz
+data/og.json
+data/stats.json
+misc
+train-work
+# 前端/工具产物与缓存
+node_modules
+dist
+dist-gh
+.venv
+__pycache__
+*.pyc
+.ruff_cache
+.mypy_cache
+static/.build
+worker/.build
+# 本机/私密
+*.log
+*.zip
+.env
+train-work/tunnel_secret.txt

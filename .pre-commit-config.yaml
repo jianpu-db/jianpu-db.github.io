@@ -1,0 +1,66 @@
+# pre-commit 钩子（D 阶段）—— 让"提交前就该发现的问题"在提交前发现。
+#
+#   py -3.13 -m uv sync --extra dev        # 装 pre-commit / ruff / mypy
+#   .venv\Scripts\pre-commit install       # 装进 .git/hooks（每个克隆各做一次）
+#   .venv\Scripts\pre-commit run --all-files
+#
+# 四条设计取舍:
+#   ① **文件卫生用官方钩子**（trailing-whitespace / end-of-file-fixer / check-yaml…）—— 别自己写；
+#   ② Python 风格/类型走**我们自己的门槛脚本** `tools/lint_python.py`（唯一真源：CI 调同一个脚本），
+#      而不是直接把 ruff 挂在所有 .py 上 —— 历史脚本会有几百条告警，把真问题淹了（见该脚本说明）；
+#   ③ 前端类型检查（tsc）与"文档数字对账"也进钩子: 这两类问题以前都是**人工发现**的；
+#   ④ 钩子只跑**改动相关**的文件（files: 限定），别让一次提交等 30 秒。
+
+default_stages: [pre-commit]
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(data/|scores/)
+      - id: end-of-file-fixer
+        exclude: ^(data/|scores/)
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=3000"]        # data/songs.jsonl.gz 是 5 MB，别把更大的东西提交进来
+        exclude: ^data/songs\.jsonl\.gz$
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: local
+    hooks:
+      # Python: ruff + mypy，只覆盖本次现代化产出的文件（唯一真源: tools/lint_python.py）
+      - id: python-gate
+        name: python gate (ruff + mypy on modern files)
+        entry: .venv/Scripts/python.exe tools/lint_python.py
+        language: system
+        pass_filenames: false
+        files: ^(app/api\.py|tools/(lint_python|check_parity_legacy_vs_fastapi|check_docs_numbers|make_isolated_db)\.py|pyproject\.toml)$
+
+      # 前端/Worker 的类型检查（B 阶段引入的三份 tsconfig）
+      - id: tsc
+        name: tsc (front-end + worker)
+        entry: npm run typecheck
+        language: system
+        pass_filenames: false
+        files: ^(static/.*\.ts|worker/.*\.ts|tsconfig.*\.json|package\.json)$
+
+      # 文档里的数字必须与语料实测一致（A 阶段加的检查；简历材料最容易对不上账）
+      - id: docs-numbers
+        name: docs numbers match corpus
+        entry: .venv/Scripts/python.exe tools/check_docs_numbers.py
+        language: system
+        pass_filenames: false
+        files: ^(README\.md|docs/.*\.md)$
+
+      # 前端检索口径的核心用例（改了 search.ts / jptok.ts 就跑）
+      - id: search-check
+        name: front-end search check
+        entry: node tools/check_search.mjs
+        language: system
+        pass_filenames: false
+        files: ^static/(search|jptok)\.ts$

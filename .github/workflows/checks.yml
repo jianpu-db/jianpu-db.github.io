@@ -1,0 +1,128 @@
+# 质量门（D 阶段）—— 三条独立流水线，错在哪儿一目了然
+#
+#   ① web    : 前端/Worker 的 **TypeScript 类型检查** + 前端自检（矩阵: node 20 / 22）
+#   ② python : 新代码的 **ruff + mypy** 门槛 + 投稿漏斗自检 + **新旧写后端对拍** + 文档数字对账（矩阵: 3.11 / 3.13）
+#   ③ docker : **真的构建镜像**（本机那台没装 Docker，所以镜像是否可构建只有 CI 能证明）
+#
+# 为什么把"对拍"放进 CI: 换传输层时最容易坏的正是边角行为（预检状态码、CORS、鉴权与解析的先后），
+# 而这些东西**只有真起两个进程逐项比对**才能发现。对拍只打隔离语料库（tools/make_isolated_db.py 造），
+# 不会碰真数据。
+name: checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web · node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: TypeScript 类型检查（前端 + Worker 三份 tsconfig）
+        run: npm run typecheck
+      - name: 前端检索口径检查（含 buildIndex 字段回归）
+        run: node tools/check_search.mjs
+      - name: UI / 深链 / 高亮 检查
+        run: node tools/check_ui.mjs && node tools/check_tune.mjs && node tools/check_page.mjs
+      - name: token 解析互锁（Python↔JS 口径）
+        run: node tools/check_jptok_js.mjs
+      - name: 分享卡元数据检查
+        run: node tools/check_og_meta.mjs
+      - name: 性能基线（打印索引就绪与查询中位，供趋势对比）
+        run: node tools/bench_search.mjs 20
+
+  python:
+    name: python · ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 装依赖（uv.lock 钉死）
+        run: uv sync --extra dev
+      - name: ruff + mypy 门槛（新代码）
+        run: uv run python tools/lint_python.py
+      - name: 投稿漏斗自检（纯逻辑，不写盘）
+        run: uv run python tools/check_submit.py
+      - name: 造隔离语料库
+        run: uv run python tools/make_isolated_db.py --out "$RUNNER_TEMP/iso-legacy" --force
+      - name: 造第二份隔离语料库（对拍要两边各一份，避免互相干扰）
+        run: uv run python tools/make_isolated_db.py --out "$RUNNER_TEMP/iso-fastapi" --force
+      - name: 起两份写后端（标准库版 + FastAPI 版）
+        run: |
+          set -e
+          JIANPU_DB="$RUNNER_TEMP/iso-legacy"  uv run python app/server.py 8776 &
+          JIANPU_DB="$RUNNER_TEMP/iso-fastapi" uv run python app/api.py    8777 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8776/api/health >/dev/null && \
+               curl -fsS http://127.0.0.1:8777/api/health >/dev/null; then
+              echo "两份都在跑了（第 $i 次探测）"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error title=写后端没起来::30 秒内两个端口都没通"; exit 1
+      - name: 新旧对拍（21 条 × 无口令/错口令/对口令）
+        run: |
+          uv run python tools/check_parity_legacy_vs_fastapi.py --old http://127.0.0.1:8776 --new http://127.0.0.1:8777
+      - name: 文档数字与语料对账（CI 里没有语料仓库 -> 自动跳过并说明）
+        run: uv run python tools/check_docs_numbers.py
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: 构建镜像（不推送）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: jianpu-write:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: 起来自检（镜像里跑的是 FastAPI 写后端）
+        run: |
+          set -e
+          # 挂一个空的"语料库"目录：镜像只读它，健康检查不依赖语料内容
+          mkdir -p "$RUNNER_TEMP/iso-image/scores" "$RUNNER_TEMP/iso-image/feedback"
+          docker run -d --name jianpu-ci -p 127.0.0.1:8799:8770 \
+            -e JPSUBMIT_TOKEN=ci-token \
+            -v "$RUNNER_TEMP/iso-image:/corpus" \
+            jianpu-write:ci
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8799/api/health; then ok=1; echo; echo "镜像内的写后端活着（第 $i 次探测）"; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then echo "::error title=镜像起不来::30 秒内 /api/health 没通"; docker logs jianpu-ci; exit 1; fi
+          docker exec jianpu-ci python -c "import fastapi, prometheus_client; print('镜像里依赖齐: fastapi', fastapi.__version__)"
+          echo "--- /metrics 前几行（证明指标端点在镜像里也可用）---"
+          curl -fsS http://127.0.0.1:8799/metrics | head -6
+          docker rm -f jianpu-ci

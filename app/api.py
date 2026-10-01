@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """简谱旋律查歌 —— **FastAPI 版写后端**（C 阶段）。
 
 ## 定位：只做"传输 + 校验 + 文档"，业务逻辑一行都不重写
@@ -28,21 +27,82 @@ discriminated union 校验：未知 kind -> **400 + 明确列出可用 kind**。
 """
 from __future__ import annotations
 
-import io
 import os
 import sys
-from typing import Annotated, Literal, Union
+import time
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import server  # noqa: E402  —— 复用同一份口径（校验/落库/git/重建索引）
 
 VERSION = "c1"  # C 阶段第 1 版
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Prometheus 指标（D 阶段）
+#
+# 为什么加它: "投稿有没有在进来""上游还活着吗""语料涨到多少了" —— 以前只能靠
+# `/api/health` 一个 JSON 或翻日志。指标化之后，任何 Prometheus/Grafana（或 Cloudflare 的
+# 外部抓取）都能直接画出来，也让"可观测性"从"一个健康检查"变成"一条时间序列"。
+#
+# 三个纪律:
+#   ① **标签基数要小**: 请求路径用**归一化模板**（`/s/{id}`、`/img/{rel}`）而不是原样路径 ——
+#      否则 1.1 万个 `/s/<id>` 会把时间序列炸成 1.1 万条（Prometheus 最经典的翻车方式）。
+#   ② **业务指标比 QPS 值钱**: `jianpu_submissions_total{kind,result}` 直接回答"投稿漏斗哪一环掉了"。
+#   ③ **抓取要便宜**: 语料条数这种要读大文件的指标，带 60 s 缓存（否则每次 scrape 都读 21 MB）。
+# ══════════════════════════════════════════════════════════════════════════════
+REQ_TOTAL = Counter("jianpu_http_requests_total", "HTTP 请求数（按归一化路径与状态码）",
+                    ["method", "path", "status"])
+REQ_SECONDS = Histogram("jianpu_http_request_seconds", "HTTP 请求耗时（秒）",
+                        ["method", "path"],
+                        buckets=(0.005, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10))
+SUBMIT_TOTAL = Counter("jianpu_submissions_total", "投稿结果（kind=载荷类型, result=ok|rejected|error）",
+                       ["kind", "result"])
+CORPUS_SONGS = Gauge("jianpu_corpus_songs", "语料曲目数（读 data.jsonl，60 秒缓存）")
+CORPUS_BYTES = Gauge("jianpu_corpus_bytes", "语料 data.jsonl 字节数")
+FEEDBACK_FILES = Gauge("jianpu_feedback_files", "留档的投稿份数（feedback/*.json）")
+BUILD_INFO = Gauge("jianpu_build_info", "构建信息（value 恒为 1，详情在标签里）",
+                   ["version", "impl", "token_required"])
+BUILD_INFO.labels(version=VERSION, impl="fastapi", token_required=str(bool(server.TOKEN))).set(1)
+
+_corpus_cache = {"ts": 0.0, "songs": 0.0, "bytes": 0.0}
+
+
+def _path_template(path: str) -> str:
+    """把路径归一化成**低基数**模板（见上面纪律 ①）。"""
+    if path.startswith("/s/"):
+        return "/s/{id}"
+    if path.startswith("/img/"):
+        return "/img/{rel}"
+    return path
+
+
+def refresh_corpus_gauges(ttl: float = 60.0) -> None:
+    """读 `data.jsonl` 量语料规模（带 TTL 缓存，见纪律 ③）。"""
+    import time as _t
+    now = _t.time()
+    if now - _corpus_cache["ts"] < ttl:
+        return
+    path = os.path.join(server.DB, "data.jsonl")
+    try:
+        n = 0
+        with open(path, "rb") as f:
+            for line in f:
+                if line.strip():
+                    n += 1
+        CORPUS_SONGS.set(n)
+        CORPUS_BYTES.set(os.path.getsize(path))
+    except OSError:
+        CORPUS_SONGS.set(0)
+        CORPUS_BYTES.set(0)
+    _corpus_cache["ts"] = now
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -74,7 +134,7 @@ class TagsReq(_Base):
 
     kind: Literal["tags"]
     file: str = ""
-    tags: Union[list[str], str] = Field(default_factory=list,
+    tags: list[str] | str = Field(default_factory=list,
                                        description="标签列表，或逗号分隔的字符串")
 
 
@@ -97,7 +157,7 @@ class ScoreReq(_Base):
 
 
 SubmitReq = Annotated[
-    Union[LinkReq, TagsReq, AttrReq, ScoreReq],
+    LinkReq | TagsReq | AttrReq | ScoreReq,
     Field(discriminator="kind", description="按 `kind` 区分的四种投稿载荷"),
 ]
 
@@ -146,6 +206,8 @@ async def gate(request: Request, call_next):
     """
     path = request.url.path
     api = path.startswith("/api/")
+    tmpl = _path_template(path)
+    t0 = time.perf_counter()
     # ⚠ 闸门**只管 POST /api/submit** —— 旧版的 `do_GET` 里 `/api/health` 是**敞开的**（不带口令也能查）。
     #   第一版把闸套在所有 `/api/*` 上，于是带口令的实例连 `/api/health` 都回 403 ——
     #   那会让 Worker 的 `probeUpstream` 把"上游活着"判成"挂了"。对拍第二次救了我。
@@ -153,15 +215,39 @@ async def gate(request: Request, call_next):
         # ① 体积闸（与旧版同文案）
         clen = request.headers.get("content-length")
         if clen is None or not clen.isdigit() or int(clen) <= 0 or int(clen) > 200_000:
+            REQ_TOTAL.labels(request.method, tmpl, "400").inc()
+            REQ_SECONDS.labels(request.method, tmpl).observe(time.perf_counter() - t0)
             return _api_json(400, {"ok": False, "err": "body 太大或为空"})
         # ② 口令闸
         if server.TOKEN and request.headers.get("x-token") != server.TOKEN:
+            REQ_TOTAL.labels(request.method, tmpl, "403").inc()
+            REQ_SECONDS.labels(request.method, tmpl).observe(time.perf_counter() - t0)
             return _api_json(403, {"ok": False, "err": "需要 X-Token"})
     resp = await call_next(request)
+    REQ_TOTAL.labels(request.method, tmpl, str(resp.status_code)).inc()
+    REQ_SECONDS.labels(request.method, tmpl).observe(time.perf_counter() - t0)
     # ③ CORS: 只加在 JSON 响应上（旧版写在 `_json()` 里；它对"未知 /api 路径"发的是裸 404，没有这个头）
     if api and "json" in (resp.headers.get("content-type") or "").lower():
         resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Prometheus 文本格式指标（D 阶段）。
+
+    * 与 `/api/health` 一样**不需要口令**：它只暴露聚合计数（请求数、耗时直方图、投稿结果、
+      语料规模），没有任何内容/密钥；反正服务只监听本机/内网。
+    * 用官方客户端的 `generate_latest()`，所以格式一定合规；自带进程指标
+      （`process_*`、`python_gc_*`、`python_info`）。
+    * 想被 Prometheus 抓: `scrape_configs: [{job: jianpu-write, static_configs: [{targets: ['127.0.0.1:8770']}]}]`。
+    """
+    refresh_corpus_gauges()
+    try:
+        FEEDBACK_FILES.set(len(os.listdir(server.FEEDBACK)))
+    except OSError:
+        FEEDBACK_FILES.set(0)
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 def _json(code: int, obj: dict) -> JSONResponse:
@@ -249,7 +335,13 @@ async def submit(body: SubmitReq, request: Request) -> JSONResponse:
     """
     payload = body.model_dump()
     payload["_ip"] = request.client.host if request.client else ""
-    code, out = server.handle_submit(payload)          # ← 业务口径只有这一份
+    kind = str(payload.get("kind") or "new")
+    try:
+        code, out = server.handle_submit(payload)      # ← 业务口径只有这一份
+    except Exception:
+        SUBMIT_TOTAL.labels(kind, "error").inc()
+        raise
+    SUBMIT_TOTAL.labels(kind, "ok" if code == 200 else "rejected").inc()
     return _json(code, out)
 
 
@@ -276,7 +368,7 @@ async def static_or_tune(path: str, request: Request) -> Response:
     ext = os.path.splitext(full)[1].lower()
     if ext == ".html" and (path == "s" or path.startswith("s/")):
         try:
-            with io.open(full, encoding="utf-8") as f:
+            with open(full, encoding="utf-8") as f:
                 html = f.read()
             tid = server.unquote(path[2:].strip("/"))
             origin = "http://" + (request.headers.get("host") or "")

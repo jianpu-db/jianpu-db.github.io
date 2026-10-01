@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """校验**文档里引用的数字**与语料/索引实测一致 —— 防止简历材料"对不上账"。
 
 为什么需要: 简历/评审最怕"三个文档三个数"。这个检查把 README（含 URL 编码的 shields 徽章）、
@@ -10,21 +9,19 @@
 """
 import glob
 import gzip
-import io
 import json
 import os
-import re
 import sys
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB = os.path.join(os.path.dirname(ROOT), "jianpu-db")
+DB = os.environ.get("JIANPU_DB") or os.path.join(os.path.dirname(ROOT), "jianpu-db")   # 与 server.py 同规矩: 环境变量优先
 DOCS = ("README.md", "docs/TECH_STACK.md", "docs/ARCHITECTURE.md", "docs/RESUME.md")
 
 
 def corpus_numbers():
     n = notes = bars = 0
-    for line in io.open(os.path.join(DB, "data.jsonl"), encoding="utf-8"):
+    for line in open(os.path.join(DB, "data.jsonl"), encoding="utf-8"):
         line = line.strip()
         if not line:
             continue
@@ -40,10 +37,14 @@ def index_rows():
     p = os.path.join(ROOT, "data", "songs.jsonl.gz")
     if not os.path.exists(p):
         return []
-    return [l for l in gzip.open(p, "rb").read().split(b"\n") if l.strip()]
+    return [ln for ln in gzip.open(p, "rb").read().split(b"\n") if ln.strip()]
 
 
 def main():
+    # CI 里没有语料仓库（它是独立仓库）—— 这时**明确跳过**并说明，而不是把整条流水线判红。
+    if not os.path.exists(os.path.join(DB, "data.jsonl")):
+        print(f"跳过：本机没有语料库 data.jsonl（{DB}）—— 这个检查要在有语料的机器上跑")
+        return 0
     n, notes, bars, files = corpus_numbers()
     idx = len(index_rows())
     # ⚠ 用**列表**而不是 dict: 曲数与索引行数实测是同一个数(11,495), 用 dict 当 key 会互相覆盖 ——
@@ -61,7 +62,7 @@ def main():
             print(f"  ! 缺少 {rel}")
             bad += 1
             continue
-        txt = io.open(p, encoding="utf-8").read()
+        txt = open(p, encoding="utf-8").read()
         decoded = urllib.parse.unquote(txt)              # shields 徽章里的数字是 URL 编码的
         hits = [f"{label}（{num}）" for num, label in must if num in decoded]
         miss = [f"{label}（{num}）" for num, label in must if num not in decoded]

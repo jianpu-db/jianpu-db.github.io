@@ -1,0 +1,51 @@
+# 简谱旋律查歌 —— 一条命令跑起来（写后端 + 可选隧道）
+#
+#   docker compose up -d api                 # 只起写后端（抓本机 ../jianpu-db 当语料）
+#   JIANPU_DB=/path/to/jianpu-db docker compose up -d api
+#   docker compose --profile tunnel up -d    # 连隧道一起起（对外可写）
+#   docker compose logs -f api
+#   docker compose down
+#
+# 三个设计点:
+#   ① **语料是挂卷，不是烤进镜像** —— 投稿要 `git commit` 到真实仓库（见 Dockerfile 顶部说明）；
+#   ② 口令必须显式给（`JPSUBMIT_TOKEN`）：没口令时服务会对内网敞开写接口，compose 里干脆**不给默认值**，
+#      逼使用者显式设置（`:?` 语法，缺了就报错停下）；
+#   ③ 隧道放 `tunnel` profile：默认不起 —— 大多数人只想在本机跑；要暴露时一条 `--profile tunnel`。
+
+name: jianpu
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jianpu-write:local
+    # 只绑本机回环：要对外暴露请走隧道（下面的 tunnel 服务），别直接把 8770 开到公网
+    ports:
+      - "127.0.0.1:8770:8770"
+    environment:
+      JIANPU_DB: /corpus
+      JIANPU_HOST: 0.0.0.0
+      JPSUBMIT_TOKEN: ${JPSUBMIT_TOKEN:?请显式设置 JPSUBMIT_TOKEN（写接口口令），例如 JPSUBMIT_TOKEN=xxx docker compose up}
+    volumes:
+      # 语料仓库（默认取与本仓库平级的 ../jianpu-db；可用 JIANPU_DB 覆盖路径）
+      - ${JIANPU_DB:-../jianpu-db}:/corpus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8770/api/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 需要"把写接口暴露到公网"时才起：`docker compose --profile tunnel up -d`
+  # 起来之后把打印出来的 https://xxx.trycloudflare.com 填进 Worker 的 API_UPSTREAM 秘密。
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://api:8770
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,19 @@
+# 行尾定死：仓库里存 LF，工作区也检成 LF。
+#
+# 为什么值得单独一个文件: 这个项目**两次**栽在 CRLF 上 ——
+#   ① 用 `$` 锚点匹配曲谱字段时，CRLF 的行尾让 `^artist=\s*$` 之类**匹配不到**（静默漏字段）；
+#   ② 静态资源是**按内容哈希**命名的（`app.<hash>.js`），CRLF/LF 混用会让同一个源文件产出两个名字。
+# `build_dist.mjs` 里已经把产物钉成 LF，这里把"工作区/仓库"两头也对齐，省得再靠人记。
+* text=auto eol=lf
+
+# 二进制别碰（免得 git 试图"转换"它们）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.gz binary
+*.zip binary
+*.ico binary
+*.woff binary
+*.woff2 binary

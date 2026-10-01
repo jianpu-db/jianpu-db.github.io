@@ -8,7 +8,7 @@
 
 > 用视觉语言模型把 3 家简谱站的扫描件转成**11,495 首 / 253 万音符**的可检索语料，
 > 做成一个"**只哼开头几个音就能查到这首歌**"的站点：检索**全在浏览器里跑**（索引 5.12 MB gz、
-> 就绪 204 ms、单次查询中位 151 ms），写回走"边缘反代 + 本机 git 提交"的混合架构。
+> 就绪 ~200 ms、单次查询中位 **106 ms**），写回走"边缘反代 + 本机 git 提交"的混合架构。
 
 ## 中文（项目经历，4~6 条）
 
@@ -39,9 +39,14 @@
 * **边缘原生（Edge-native）**：Cloudflare Workers + Assets 承载读路径，自定义域名 + 自动 TLS；
   `/s/<id>` 做边缘 meta 注入（SSR-lite），静态资源内容寻址 + immutable 长缓存。
 * **零依赖前端**：无框架、无打包器、无 npm 运行时依赖；`DecompressionStream` 流式解压 5.12 MB 索引，
-  11,495 首全库**代价匹配**在浏览器内 151 ms（p90 198 ms）。
-* **可复现评测与质量门**：金曲清单评测（L=11/15、Top-1/3/5、**错音必须为 0**、公开"代价并列率"），
+  11,495 首全库**代价匹配**在浏览器内 106 ms（优化后；p90 114 ms）。
+* **可复现评测与质量门**：金曲清单评测（L=11/15、Top-1/3/5、**错音必须为 0**、公开"代价并列率"）；
+  **12 条排名金标准进 CI**（每条查询都取自目标歌自己的谱，所以正确答案是客观的，不是"把当前行为烤进去"）；
   78 个自检/QA 脚本 + Python↔JS 口径互锁（21,711 token 逐项一致）。
+* **一个"缺失假装成功"的线上 bug**：SPA 兜底把任何找不到的路径用 `200 + index.html` 返回，
+  于是"文件不在"表现为"读到了 HTML"（自检 gunzip 直接崩）。补丁式白名单两次被绕过
+  （URL 规范化吃掉 `/img/` 前缀、`../etc/passwd` 没有扩展名），最后改成**原则**：
+  SPA 兜底只对页面路由生效，其余路径查到 HTML 即 404；补了 Worker 路由回归测试（23 项）进 CI。
 
 ## English (CV bullets)
 
@@ -50,20 +55,42 @@
   (Qwen3-VL-2B)** for structured extraction, plus purity/texture quality gates and multi-page stitching;
   measured throughput **59–95 scores/hour** on a single 8 GB GPU, fully idempotent and re-runnable.
 * Designed **client-side retrieval**: a gzip-streamed 5.12 MB index is decompressed and indexed in
-  **204 ms**, and an octave-insensitive *cost-based* melody matcher answers a query in **151 ms median**
-  (p90 198 ms) **entirely in the browser** — no backend, no framework, no bundler.
+  **~200 ms**, and an octave-insensitive *cost-based* melody matcher answers a query in **106 ms median**
+  (p90 114 ms) **entirely in the browser** — no backend, no framework, no bundler (two rounds of
+  profiling-driven optimisation; see the performance bullets below).
 * Shipped an **edge-native** deployment on **Cloudflare Workers + Assets** with per-song metadata
   injection for 11.5k SPA deep links (`run_worker_first`), custom domain + automatic TLS, and a
   **hybrid write path** (edge reverse proxy → author's machine → `git commit`) gated by `X-Token`.
-* Instrumented reliability: `/api/health` surfaces index cardinality, upstream and write-back status;
+* Instrumented reliability: **Prometheus `/metrics`** (normalised path templates so 11.5k score pages cannot explode label cardinality, corpus-size gauge with TTL) plus `/api/health` surfacing index cardinality, upstream and write-back status;
   78 self-check/QA scripts and cross-implementation parity locks (21,711 tokens) guard every release;
   a gold-list eval harness enforces **0 wrong-note queries** and reports tie rates.
+* **Migrated the write backend to FastAPI + Pydantic v2 (uv-locked, auto-generated OpenAPI `/docs`) with
+  zero business-logic rewrite**, proving equivalence with a **21-request × 3-auth-scenario parity matrix**
+  against the legacy stdlib service, then cut over behind a switch that can roll back instantly.
+* **Performance engineering (measure first):** profiled the shipped matcher and found the real bottleneck
+  was the sort comparator allocating a `Set` per comparison — precomputing sort keys cut query latency
+  **144.6 → 105.9 ms (-27%)**; then added an **n-gram prefilter** that prunes to **0.01–6.8%** of the corpus,
+  cutting long-query latency a further **30% (69.1 → 48.2 ms)** while returning **identical** results
+  (verified on 60 queries incl. fuzzy and multi-segment).
+* **A rejected optimization, decided by measurement:** built a **Rust→Wasm** inner loop (0.9 KB, no
+  wasm-bindgen) and proved per-song cost parity on **137,940 comparisons** plus identical end-to-end
+  results — but measured only **0.84× end-to-end**, so it was **not shipped**; the negative result is
+  documented and the harness kept as an asset.
+* **Quality gates in CI:** a **12-case ranking golden set** (each query sliced from its target song's own
+  score, so the expected answer is objective), a Worker-routing test asserting missing assets return
+  **404** instead of the SPA fallback's `200 + HTML`, and a pruning-equivalence test; added
+  **Docker build** to the matrix (the image's buildability is proven by CI, since the dev machine has no
+  Docker) plus **ruff/mypy** thresholds and **pre-commit**.
+* **Recall measured from both sides:** offline harness reports the **recall upper bound (Top-1 100%)**,
+  while a product-side harness runs the shipped TypeScript matcher and reports the **actual ranking**
+  (**Top-1 97.6% / Top-3 100% at L=15**, 93.7% at L=11); the two agree once the tie policy is equalised,
+  which showed the remaining gap is **tie-break policy, not matching ability**.
 
 ## 可能被追问的点（提前准备）
 
 | 追问 | 一句话答 |
 |---|---|
-| 为什么检索放浏览器？ | 无服务端成本、隐私好（查询不上传）、延迟可控（151 ms）；索引 5 MB 级完全装得下 |
+| 为什么检索放浏览器？ | 无服务端成本、隐私好（查询不上传）、延迟可控（中位 106 ms）；索引 5 MB 级完全装得下 |
 | 为什么不用数据库/框架？ | 语料是文件 + JSONL；引入只会增加部署面。需要并发写/服务端检索时再上（见 TECH_STACK 第三节） |
 | VLM 会不会不可靠？ | 三道质量门 + 置信度分位 + 人工 `ok` 状态；并公开"代价并列率"暴露不确定性 |
 | 你怎么发现自己的 bug？ | 靠**产物侧的证据**：sidecar 的 `page_notes`/`dropped_pages`、`compare_multipage` 的变长/变短统计、以及每次收尾对账 |

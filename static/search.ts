@@ -228,6 +228,49 @@ function cost(q: Note, cd: number, ca: number): number {
 }
 
 /**
+ * **单曲最佳窗口**（一段查询落在这一首里的最优位置）。
+ *
+ * 为什么把它单独抽出来（2026-10-01，E 阶段接 wasm 时）:
+ *   这段滑窗是整个检索最热的地方，也正是 Rust→Wasm 那份实现要接管的**同一粒度**。
+ *   抽成一个导出函数后，对拍测试（`tools/check_wasm_parity.mjs`）可以**逐首**比
+ *   `(cost, at)` —— 而不是只比最终卡片（那太粗，错误会互相抵消）。
+ *
+ * 语义与原来逐字一致:
+ *   * 早退用**严格大于**（同分窗口要看段落权重: 副歌优先于前奏，不能被 `>=` 砍掉）；
+ *   * 同代价时按**段落权重**选窗口（`secWeightOf` 大的赢）；
+ *   * 不传 `limitCost` 时扫全部窗口。
+ *
+ * `limitCost` 是给 wasm 加速路径用的：已知全库最优代价后，只关心"能不能达到那个代价"的窗口，
+ * 传进来就能在超过它时立刻早退（不传 = 与原实现完全一样）。
+ */
+export function bestWindow(
+  s: Song, q: Note[], limitCost?: number,
+): { cost: number; at: number; sec: string } | null {
+  const n = q.length;
+  const { P, A } = arraysOf(s);
+  if (P.length < n) return null;
+  let best: { cost: number; at: number; sec: string } | null = null;
+  const cap = limitCost ?? Number.POSITIVE_INFINITY;
+  for (let i = 0; i + n <= P.length; i++) {
+    let c = 0;
+    let aborted = false;          // ⚠ 必须显式记"这个窗口没算完" —— 不然部分代价会被当成完整代价
+    for (let k = 0; k < n; k++) {
+      c += cost(q[k]!, P[i + k]!, A[i + k]!);
+      // 早退用**严格大于**: 同分窗口要看段落权重(副歌优先于前奏), 不能被 >= 提前砍掉
+      if ((best && c > best.cost) || c > cap) { aborted = true; break; }
+    }
+    if (aborted) continue;        // 已经不可能成为最优（也不可能满足 limitCost）
+    if (!best || c < best.cost) {
+      best = { cost: c, at: i, sec: secNameAt(s, i, n) };
+    } else if (c === best.cost) {
+      const nm = secNameAt(s, i, n);
+      if (secWeightOf(nm) > secWeightOf(best.sec)) best = { cost: c, at: i, sec: nm };
+    }
+  }
+  return best;
+}
+
+/**
  * 检索。
  * @param idx  buildIndex 的结果
  * @param segs parseQuery 得到的音符数组(每段 >=5 音)——**支持多段**: 各段取最小代价后相加
@@ -245,21 +288,12 @@ export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResul
       const n = q.length;
       let best: Hit | null = null;
       for (const s of members) {
-        const { P, A } = arraysOf(s);
-        if (P.length < n) continue;
-        for (let i = 0; i + n <= P.length; i++) {
-          let c = 0;
-          for (let k = 0; k < n; k++) {
-            c += cost(q[k]!, P[i + k]!, A[i + k]!);
-            // 早退用**严格大于**: 同分窗口要看段落权重(副歌优先于前奏), 不能被 >= 提前砍掉
-            if (best && c > best.cost) break;
-          }
-          if (!best || c < best.cost) {
-            best = { cost: c, at: i, song: s, q, sec: secNameAt(s, i, n) };
-          } else if (c === best.cost) {
-            const nm = secNameAt(s, i, n);
-            if (secWeightOf(nm) > secWeightOf(best.sec)) best = { cost: c, at: i, song: s, q, sec: nm };
-          }
+        const w = bestWindow(s, q);
+        if (!w) continue;
+        // 与原实现同序: 严格更小才替换（组内先到者优先），同代价时按段落权重
+        if (!best || w.cost < best.cost
+            || (w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec))) {
+          best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
         }
       }
       if (!best) { ok = false; break; }

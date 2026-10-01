@@ -39,6 +39,9 @@ node tools/check_dup_melody.mjs 2>&1 | tail -n 8
 # 为什么单独有它: 离线 Python 评测验不到 TS 侧 —— 剪枝最坏就是"把目标歌剪掉"，离线口径看不出来。
 echo; echo "=== 前端口径召回（基准在工具仓库, 没有就跳过）==="
 node tools/check_recall.mjs 2>&1 | tail -n 6
+# 排名金标准: 12 条"查询取自目标歌自己的谱"的客观用例（CI 也跑这条）
+echo; echo "=== 排名金标准 ==="
+node tools/check_ranking_golden.mjs 2>&1 | tail -n 3
 # 前端 jptok.js 与 Python 侧 jptok.py 的**token 口径**等价性(第三份口径的锁, 见 check_jptok_parity.sh)。
 # 需要 jianpu2/jianpu-db 就在旁边; 扫全语料约 30s, JIANPU_QUICK=1 时跳过。
 ROOT="$(dirname "$WEB")"

@@ -1,0 +1,42 @@
+[project]
+name = "jianpu-web"
+version = "1.0.0"
+description = "简谱旋律查歌 —— 读路径(Cloudflare Worker + 浏览器)与写后端(FastAPI)"
+requires-python = ">=3.10"
+# 只有**写后端**需要这些依赖；读路径（Worker + 浏览器）零依赖。
+# 旧的标准库版 `app/server.py` 到现在也是零依赖，留着当"随时可退回"的备份实现。
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# 开发/自检用的东西：类型检查、格式化、以及在 CI 里跑对拍
+dev = [
+    "ruff>=0.7",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+# `uv run jianpu-write` 就能起写后端（等价于 py -3.13 app/api.py）
+jianpu-write = "app.api:main"
+
+[tool.uv]
+# uv 会把这个文件当唯一依赖真源；`uv sync` 建虚拟环境，`uv run ...` 直接跑。
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+exclude = ["dist", "dist-gh", "data", "static/.build", "worker/.build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]        # 行宽由 line-length 管；本项目注释多，不强求
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# 只对**新写的**写后端做严格检查；老代码（server.py 等）先不进范围
+files = ["app/api.py"]

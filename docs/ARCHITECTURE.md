@@ -92,7 +92,7 @@ flowchart TB
 | 索引 | 曲谱 → 检索索引 + 分享卡索引 | `build_web_data.py` → `songs.jsonl.gz` / `stats.json` / `og.json` / `sitemap.xml`；前端 `tsc` 类型检查 + esbuild 擦除后按内容哈希发布 |
 | 边缘 | 静态资产、每谱注入、原图、反向代理写请求 | Cloudflare Workers（V8 isolates）+ Workers Assets（`run_worker_first`） |
 | 前端 | 检索/卡片/谱页/深链，**全部在浏览器里跑** | TypeScript（**零运行时依赖**的 ES module；esbuild 只做类型擦除、不打包）；`tsc` 三份配置：前端核心 strict、主界面过渡（DOM 胶水层待收紧）、Worker strict |
-| 写服务 | 校验 → 改曲谱 → `git commit` → 触发重建 | 本机 `app/server.py`（Python 标准库），经隧道暴露，`X-Token` 鉴权 |
+| 写服务 | 校验 → 改曲谱 → `git commit` → 触发重建 | **两份实现、一份口径**：`app/api.py`（FastAPI + Pydantic v2，主力，`/docs` 自动文档）与 `app/server.py`（标准库版，零依赖，随时可退回）；经隧道暴露，`X-Token` 鉴权；切换前用对拍矩阵逐项验证 |
 | 语料仓库 | 唯一真源（曲谱 + 索引 + 留档） | git（CI 重建 + Pages 发布） |
 
 ## 三、数据契约
@@ -153,7 +153,7 @@ link=https://…           # 人工核对过的收录页（搜索页会被拒收
 |---|---|---|
 | **`https://jianpu-db.org/`** | Cloudflare Worker（正式站） | 检索/卡片/谱页 + **投稿/补属性/补标签**（写路径）+ 每谱注入 |
 | `https://jianpu-db.github.io/` | GitHub Pages（只读镜像） | 只读；写操作提示"去正式站" |
-| `http://127.0.0.1:8770/` | 本机服务 | 开发/内网；**唯一真正写盘 + git commit 的地方** |
+| `http://127.0.0.1:8770/` | 本机写后端（**FastAPI 版**） | 开发/内网；**唯一真正写盘 + git commit 的地方**；`/docs` 有交互式接口文档；退回标准库版: `py -3.13 app/server.py 8770` |
 | 便携包 `jianpu-server/` | 同一份服务的可搬走版本 | 换台电脑：Python + （可选）cloudflared 即可 |
 
 关键点：

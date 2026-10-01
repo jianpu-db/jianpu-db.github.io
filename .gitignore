@@ -15,3 +15,9 @@ static/.build/
 
 # B 阶段: 检查脚本按需转译 .ts 的缓存(tools/_built.mjs) —— 任意目录下的 .build/
 **/.build/
+
+# C/D 阶段: uv 的虚拟环境与 Python 工具缓存
+.venv/
+.ruff_cache/
+.mypy_cache/
+__pycache__/

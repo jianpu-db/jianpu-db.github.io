@@ -12,6 +12,7 @@
 import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { transform } from 'esbuild';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,31 @@ const STATIC = join(ROOT, 'static');
 const CACHE = join(STATIC, '.build');
 
 const TS_OPTS = { loader: 'ts', format: 'esm', target: 'es2022', charset: 'utf8' };
+
+/**
+ * 缓存新鲜度: **按源文件内容哈希**判断，不看 mtime。
+ *
+ * ⚠ 2026-10-02 血泪: 原来判的是 `mtime(缓存) > mtime(源)`。我做"门槛真的会红吗"的反向验证时，
+ * 先注入一处坏改动、跑一遍（缓存被刷新），再用 `Copy-Item` 还原 —— 而 `Copy-Item` **保留备份的旧
+ * mtime**，于是缓存的构建比源"更新"，`_built` 一直返回**那份注入了坏代码的旧构建**，
+ * 门槛于是红着不停 ✗。更普遍地说: 任何"把更旧的文件放回来"（`git checkout` 旧版本、解压备份、
+ * 从别处拷一份）都会让测试**测的是旧代码**，而它照样报绿/报红 —— 这类"测试装置骗人"最难查。
+ * 内容哈希没有这个问题: 内容变了就重建，内容没变就复用。
+ */
+function hashOf(code) {
+  return createHash('sha1').update(code).digest('hex').slice(0, 16);
+}
+
+/** 读缓存文件首行的 `// build-hash: xxx`（没有就返回 ''）。 */
+function cachedHash(out) {
+  try {
+    const first = readFileSync(out, 'utf8').slice(0, 64);
+    const m = /^\/\/ build-hash: ([0-9a-f]+)/.exec(first);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
 
 // 模块之间的依赖（`app` import `./search.js` / `./jptok.js`；`search` import `./jptok.js`）。
 // ⚠ 必须**先转依赖再转自己**：转译产物落在 `static/.build/`，而源码里的相对 import 是 `./search.js`
@@ -36,13 +62,13 @@ export async function transpile(name) {
   if (!existsSync(src)) throw new Error(`找不到源文件: static/${name}.ts|.js`);
   mkdirSync(CACHE, { recursive: true });
   const out = join(CACHE, `${name}.js`);
-  // 源没变就不重复转译（检查脚本会被反复调用）
-  if (existsSync(out) && statSync(out).mtimeMs > statSync(src).mtimeMs) return out;
   const code = readFileSync(src, 'utf8');
+  const h = hashOf(code);
+  if (existsSync(out) && cachedHash(out) === h) return out;   // 内容没变 -> 复用（见 hashOf 的注释）
   const res = src.endsWith('.ts')
     ? await transform(code, { ...TS_OPTS, sourcefile: src })
     : { code };                                   // 纯 JS 直接拷贝（保持与线上一致）
-  writeFileSync(out, res.code);
+  writeFileSync(out, `// build-hash: ${h}\n${res.code}`);
   return out;
 }
 
@@ -63,10 +89,11 @@ export async function importRepoFile(rel) {
   const outDir = join(dirname(src), '.build');
   mkdirSync(outDir, { recursive: true });
   const out = join(outDir, basename(src).replace(/\.ts$/, '.js'));
-  if (!existsSync(out) || statSync(out).mtimeMs < statSync(src).mtimeMs) {
-    const code = readFileSync(src, 'utf8');
+  const code = readFileSync(src, 'utf8');
+  const h = hashOf(code);
+  if (!existsSync(out) || cachedHash(out) !== h) {      // 同样按内容哈希，不看 mtime
     const res = await transform(code, { ...TS_OPTS, sourcefile: src });
-    writeFileSync(out, res.code);
+    writeFileSync(out, `// build-hash: ${h}\n${res.code}`);
   }
   return import(pathToFileURL(out).href);
 }

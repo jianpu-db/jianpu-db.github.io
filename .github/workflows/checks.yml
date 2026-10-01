@@ -80,6 +80,8 @@ jobs:
         run: node tools/check_og_meta.mjs
       - name: Worker 路由（缺失资源必须 404, 页面路由仍兜底 index.html）
         run: node tools/check_worker_routes.mjs
+      - name: 排名金标准（查询取自目标歌自己的谱; 断言=命中+代价+前三名）
+        run: node tools/check_ranking_golden.mjs
       - name: ngram 剪枝等价性（结果必须与全扫逐条相同）
         run: node tools/check_prune_parity.mjs 40
       - name: wasm 逐首/端到端对拍（缺工具仓库产物时明确跳过）

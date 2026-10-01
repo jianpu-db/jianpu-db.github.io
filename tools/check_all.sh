@@ -33,6 +33,8 @@ run node tools/check_worker_routes.mjs
 # 归组重复是**报告**不是门槛（它报的是"用户可见的重复"，那是产品决策不是 bug），所以只打印:
 echo; echo "=== 归组重复报告（非门槛）==="
 node tools/check_dup_groups.mjs 2>&1 | tail -n 6
+echo; echo "=== 精确重复旋律报告（非门槛）==="
+node tools/check_dup_melody.mjs 2>&1 | tail -n 8
 # 前端 jptok.js 与 Python 侧 jptok.py 的**token 口径**等价性(第三份口径的锁, 见 check_jptok_parity.sh)。
 # 需要 jianpu2/jianpu-db 就在旁边; 扫全语料约 30s, JIANPU_QUICK=1 时跳过。
 ROOT="$(dirname "$WEB")"

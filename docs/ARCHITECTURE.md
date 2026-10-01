@@ -91,7 +91,7 @@ flowchart TB
 | 成品化 | token 流 → 带头部元数据的曲谱文件 | `to_jianpu_db.py`（复用旧成品里的拍号/人工标记/composer→mbid 缓存） |
 | 索引 | 曲谱 → 检索索引 + 分享卡索引 | `build_web_data.py` → `songs.jsonl.gz` / `stats.json` / `og.json` / `sitemap.xml`；前端 `tsc` 类型检查 + esbuild 擦除后按内容哈希发布 |
 | 边缘 | 静态资产、每谱注入、原图、反向代理写请求 | Cloudflare Workers（V8 isolates）+ Workers Assets（`run_worker_first`） |
-| 前端 | 检索/卡片/谱页/深链，**全部在浏览器里跑** | TypeScript（**零运行时依赖**的 ES module；esbuild 只做类型擦除、不打包） |
+| 前端 | 检索/卡片/谱页/深链，**全部在浏览器里跑** | TypeScript（**零运行时依赖**的 ES module；esbuild 只做类型擦除、不打包）；`tsc` 三份配置：前端核心 strict、主界面过渡（DOM 胶水层待收紧）、Worker strict |
 | 写服务 | 校验 → 改曲谱 → `git commit` → 触发重建 | 本机 `app/server.py`（Python 标准库），经隧道暴露，`X-Token` 鉴权 |
 | 语料仓库 | 唯一真源（曲谱 + 索引 + 留档） | git（CI 重建 + Pages 发布） |
 

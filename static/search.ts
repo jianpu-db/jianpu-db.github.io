@@ -43,6 +43,12 @@ export interface Song {
 
 interface NoteArrays { P: Uint8Array; A: Int8Array; O: Int8Array }
 
+/** ngram 倒排（懒建）: gram 串 -> 歌下标数组。给"精确命中"的查询做剪枝用。 */
+export interface GramIndex {
+  k: number;
+  map: Map<string, number[]>;
+}
+
 export interface Index {
   songs: Song[];
   groups: Map<string, Song[]>;
@@ -51,6 +57,8 @@ export interface Index {
   byId: Map<string, Song>;
   count: number;
   groupCount: number;
+  /** 懒建的 ngram 倒排（`ensureGrams()` 填；没有就全扫，功能不受影响） */
+  grams?: GramIndex;
 }
 
 /** 一段查询在某一首里的最佳命中 */
@@ -155,6 +163,53 @@ export function buildIndex(text: string): Index {
   const byId = new Map<string, Song>();
   for (const s of songs) if (s.id && !byId.has(s.id)) byId.set(s.id, s);
   return { songs, groups, pop, hot, byId, count: songs.length, groupCount: groups.size };
+}
+
+/**
+ * **懒建 ngram 倒排**（`K=4`）。
+ *
+ * 为什么单独一个函数、而不是塞进 `buildIndex()`: 实测建它要 **~165 ms**（语料 2.5M 音符），
+ * 而 `buildIndex` 本身已经 ~140 ms —— 直接加进去会把"打开页面到能用"的时间从 ~200 ms 推到 ~370 ms。
+ * 所以由调用方决定什么时候建（浏览器里在**空闲时**建一次即可；没建好就走全扫，功能不受影响）。
+ */
+export function ensureGrams(idx: Index, k = 4): GramIndex {
+  if (idx.grams) return idx.grams;
+  const map = new Map<string, number[]>();
+  for (let i = 0; i < idx.songs.length; i++) {
+    const p = idx.songs[i]!.p;
+    for (let j = 0; j + k <= p.length; j++) {
+      const g = p.slice(j, j + k);
+      const a = map.get(g);
+      if (a) a.push(i); else map.set(g, [i]);
+    }
+  }
+  idx.grams = { k, map };
+  return idx.grams;
+}
+
+/** 某一段查询的候选歌掩码（1 = 这一首**可能**精确命中）。`null` = 这段剪不了（太短）。 */
+function candidateMask(idx: Index, q: Note[]): { mask: Uint8Array; count: number } | null {
+  const g = idx.grams;
+  if (!g) return null;
+  const qstr = q.map((x) => x.d).join('');
+  if (qstr.length < g.k) return null;
+  let best: number[] | null = null;
+  let bestLen = Infinity;
+  for (let j = 0; j + g.k <= qstr.length; j++) {
+    const arr = g.map.get(qstr.slice(j, j + g.k));
+    if (!arr) return { mask: new Uint8Array(idx.songs.length), count: 0 };  // 这个 gram 全库没有 -> 不可能精确命中
+    if (arr.length < bestLen) { bestLen = arr.length; best = arr; }
+  }
+  if (!best) return null;
+  const mask = new Uint8Array(idx.songs.length);
+  let count = 0;
+  for (const i of best) {
+    if (mask[i]) continue;                       // posting 里有重复（重复 gram），要跳过
+    mask[i] = 1;
+    if (idx.songs[i]!.p.includes(qstr)) count++;
+    else mask[i] = 0;
+  }
+  return { mask, count };
 }
 
 /** 每首歌把 p/a/o 三级数组缓存到对象上(第一次访问时构建) */
@@ -294,6 +349,9 @@ export function bestWindow(
 export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResult[] {
   const o = opt ?? {};
   const top = o.top || 10;
+
+  /** 跑一遍"组 → 成员 → 窗口"。`allow` 可以按段限制成员（剪枝时用）。 */
+  const collect = (allow?: (si: number, s: Song) => boolean): Candidate[] => {
   const res: Candidate[] = [];
   for (const [group, members] of idx.groups) {
     let total = 0, exact = 0;
@@ -309,9 +367,14 @@ export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResul
         //    为什么还要复算: 段落权重换窗与 exact 计数是产品口径（留在 TS）；而"哪些成员可能赢"
         //    由表决定，所以复算的成员数极少（实测一条查询 ~几首），语义与全扫**完全同序**。
         let minCost = 0xffffffff;
-        for (const s of members) { const c = tbl.costs[s.i]!; if (c < minCost) minCost = c; }
+        for (const s of members) {
+          if (allow && !allow(si, s)) continue;
+          const c = tbl.costs[s.i]!;
+          if (c < minCost) minCost = c;
+        }
         if (minCost === 0xffffffff) { ok = false; break; }
         for (const s of members) {
+          if (allow && !allow(si, s)) continue;
           if (tbl.costs[s.i] !== minCost) continue;
           const w = bestWindow(s, q, minCost);
           if (!w) continue;
@@ -323,6 +386,7 @@ export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResul
       }
       if (!best && !tbl) {
         for (const s of members) {
+          if (allow && !allow(si, s)) continue;
           const w = bestWindow(s, q);
           if (!w) continue;
           // 与原实现同序: 严格更小才替换（组内先到者优先），同代价时按段落权重
@@ -348,6 +412,29 @@ export function search(idx: Index, segs: Note[][], opt?: SearchOpt): SearchResul
     }
     if (ok && det.length) res.push({ group, total, exact, det, secW, sec });
   }
+  return res;
+  };
+
+  // ── 先试 ngram 剪枝（可选：只有建好倒排、且**每一段都能查到精确命中**时才敢走）──────────
+  //    为什么这样是**可证明安全**的:
+  //      * 代价 0 要求每个音（音级 + 变音）都对上 -> 它的音级子串必然包含查询音级串
+  //        -> **所有代价 0 的歌都在候选集里**（候选 = 音级串包含查询的歌，是个超集）；
+  //      * 于是每段的组内最小代价仍是 0（与全扫一致），并列裁决要用的那批歌一个不少；
+  //      * 只有当"代价 0 的结果已经够填满榜单"时才采用剪枝结果 —— 代价 >0 的候选永远排在
+  //        代价 0 之后，不可能挤进前 `top`，所以榜单**逐条相同**；不够就退回全扫。
+  //    （这条规则是量出来的: 真实查询就是"库里某首歌的片段"，精确命中率极高；剪枝把搜索空间
+  //      降到 0.01%–6.8%，见 tools/_prototype_prune.mjs / _prototype_cover.mjs。）
+  let res: Candidate[] | null = null;
+  if (idx.grams && !o.scan) {
+    const masks = segs.map((q) => candidateMask(idx, q));
+    if (masks.every((m) => m && m.count > 0)) {
+      const fast = collect((si, s) => masks[si]!.mask[s.i] === 1);
+      let zeros = 0;
+      for (const r of fast) if (r.total === 0) zeros++;
+      if (zeros >= top) res = fast;
+    }
+  }
+  if (!res) res = collect();                       // 全扫（与今天完全一样）
   // **并列时的"证据优先"键**(2026-09-30 加, 与离线 lookup.py 同口径):
   //   ① 人工校对过(ok) 优先于机器转写(ocr) —— 实测 `33565653253` 那句: 《你怎么说》(ocr, 而且是
   //      转写把"行尾 3- + 间奏括号"连读拼出来的假片段) 原来靠人气压过《神々が恋した幻想郷》(ok)。

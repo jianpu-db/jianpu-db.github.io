@@ -1,4 +1,4 @@
-import { buildIndex, search } from "./search.5d77702d.js";
+import { buildIndex, search, ensureGrams } from "./search.6cbacf4d.js";
 import { parseQuery, isPitch, show } from "./jptok.5bf64237.js";
 var REPO = "Francium-223/jianpu-db";
 var ROOT_URL = new URL("../", import.meta.url);
@@ -812,6 +812,12 @@ $("sfill").addEventListener("click", function() {
 });
 loadCorpus().then(function(txt) {
   IDX = buildIndex(txt);
+  setTimeout(function() {
+    try {
+      if (IDX) ensureGrams(IDX, 4);
+    } catch (e) {
+    }
+  }, 800);
   return fetch(appUrl("data/stats.json")).then(function(r) {
     return r.json();
   }).then(function(st) {

@@ -83,6 +83,47 @@ function buildIndex(text) {
   for (const s of songs) if (s.id && !byId.has(s.id)) byId.set(s.id, s);
   return { songs, groups, pop, hot, byId, count: songs.length, groupCount: groups.size };
 }
+function ensureGrams(idx, k = 4) {
+  if (idx.grams) return idx.grams;
+  const map = /* @__PURE__ */ new Map();
+  for (let i = 0; i < idx.songs.length; i++) {
+    const p = idx.songs[i].p;
+    for (let j = 0; j + k <= p.length; j++) {
+      const g = p.slice(j, j + k);
+      const a = map.get(g);
+      if (a) a.push(i);
+      else map.set(g, [i]);
+    }
+  }
+  idx.grams = { k, map };
+  return idx.grams;
+}
+function candidateMask(idx, q) {
+  const g = idx.grams;
+  if (!g) return null;
+  const qstr = q.map((x) => x.d).join("");
+  if (qstr.length < g.k) return null;
+  let best = null;
+  let bestLen = Infinity;
+  for (let j = 0; j + g.k <= qstr.length; j++) {
+    const arr = g.map.get(qstr.slice(j, j + g.k));
+    if (!arr) return { mask: new Uint8Array(idx.songs.length), count: 0 };
+    if (arr.length < bestLen) {
+      bestLen = arr.length;
+      best = arr;
+    }
+  }
+  if (!best) return null;
+  const mask = new Uint8Array(idx.songs.length);
+  let count = 0;
+  for (const i of best) {
+    if (mask[i]) continue;
+    mask[i] = 1;
+    if (idx.songs[i].p.includes(qstr)) count++;
+    else mask[i] = 0;
+  }
+  return { mask, count };
+}
 function arraysOf(s) {
   if (s._p) return s._p;
   const n = s.p.length;
@@ -204,65 +245,82 @@ function bestWindow(s, q, limitCost) {
 function search(idx, segs, opt) {
   const o = opt ?? {};
   const top = o.top || 10;
-  const res = [];
-  for (const [group, members] of idx.groups) {
-    let total = 0, exact = 0;
-    const det = [];
-    let ok = true;
-    for (let si = 0; si < segs.length; si++) {
-      const q = segs[si];
-      const n = q.length;
-      let best = null;
-      const tbl = o.scan ? o.scan[si] : null;
-      if (tbl) {
-        let minCost = 4294967295;
-        for (const s of members) {
-          const c = tbl.costs[s.i];
-          if (c < minCost) minCost = c;
+  const collect = (allow) => {
+    const res2 = [];
+    for (const [group, members] of idx.groups) {
+      let total = 0, exact = 0;
+      const det = [];
+      let ok = true;
+      for (let si = 0; si < segs.length; si++) {
+        const q = segs[si];
+        const n = q.length;
+        let best = null;
+        const tbl = o.scan ? o.scan[si] : null;
+        if (tbl) {
+          let minCost = 4294967295;
+          for (const s of members) {
+            if (allow && !allow(si, s)) continue;
+            const c = tbl.costs[s.i];
+            if (c < minCost) minCost = c;
+          }
+          if (minCost === 4294967295) {
+            ok = false;
+            break;
+          }
+          for (const s of members) {
+            if (allow && !allow(si, s)) continue;
+            if (tbl.costs[s.i] !== minCost) continue;
+            const w = bestWindow(s, q, minCost);
+            if (!w) continue;
+            if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
+              best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
+            }
+          }
         }
-        if (minCost === 4294967295) {
+        if (!best && !tbl) {
+          for (const s of members) {
+            if (allow && !allow(si, s)) continue;
+            const w = bestWindow(s, q);
+            if (!w) continue;
+            if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
+              best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
+            }
+          }
+        }
+        if (!best) {
           ok = false;
           break;
         }
-        for (const s of members) {
-          if (tbl.costs[s.i] !== minCost) continue;
-          const w = bestWindow(s, q, minCost);
-          if (!w) continue;
-          if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
-            best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
-          }
+        total += best.cost;
+        for (let k = 0; k < n; k++) {
+          const { A } = arraysOf(best.song);
+          if (best.q[k].acc === A[best.at + k]) exact++;
+        }
+        det.push(best);
+      }
+      let secW = 1, sec = "";
+      for (const d of det) {
+        const w = secWeightOf(d.sec);
+        if (w > secW) {
+          secW = w;
+          sec = d.sec;
         }
       }
-      if (!best && !tbl) {
-        for (const s of members) {
-          const w = bestWindow(s, q);
-          if (!w) continue;
-          if (!best || w.cost < best.cost || w.cost === best.cost && secWeightOf(w.sec) > secWeightOf(best.sec)) {
-            best = { cost: w.cost, at: w.at, song: s, q, sec: w.sec };
-          }
-        }
-      }
-      if (!best) {
-        ok = false;
-        break;
-      }
-      total += best.cost;
-      for (let k = 0; k < n; k++) {
-        const { A } = arraysOf(best.song);
-        if (best.q[k].acc === A[best.at + k]) exact++;
-      }
-      det.push(best);
+      if (ok && det.length) res2.push({ group, total, exact, det, secW, sec });
     }
-    let secW = 1, sec = "";
-    for (const d of det) {
-      const w = secWeightOf(d.sec);
-      if (w > secW) {
-        secW = w;
-        sec = d.sec;
-      }
+    return res2;
+  };
+  let res = null;
+  if (idx.grams && !o.scan) {
+    const masks = segs.map((q) => candidateMask(idx, q));
+    if (masks.every((m) => m && m.count > 0)) {
+      const fast = collect((si, s) => masks[si].mask[s.i] === 1);
+      let zeros = 0;
+      for (const r of fast) if (r.total === 0) zeros++;
+      if (zeros >= top) res = fast;
     }
-    if (ok && det.length) res.push({ group, total, exact, det, secW, sec });
   }
+  if (!res) res = collect();
   const okOf = (r) => r.det[0] && r.det[0].song.status === "ok" ? 0 : 1;
   const confOf = (r) => {
     const c = parseFloat(r.det[0] && r.det[0].song.conf || "");
@@ -337,6 +395,7 @@ export {
   SEC_W,
   bestWindow,
   buildIndex,
+  ensureGrams,
   popKey,
   search,
   secLabelOf,

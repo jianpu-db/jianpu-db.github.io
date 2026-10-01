@@ -8,7 +8,7 @@
 // 用法: node tools/bench_search.mjs 30
 import { readFileSync } from 'node:fs';
 import { importStatic } from './_built.mjs';
-const { buildIndex, search } = await importStatic('search');
+const { buildIndex, search, ensureGrams } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
 
@@ -31,6 +31,11 @@ const raw = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.met
 const t1 = performance.now();
 const idx = buildIndex(raw.toString('utf8'));
 const t2 = performance.now();
+// 线上（app.ts）会在**空闲时**建 ngram 倒排给剪枝用 —— 基准也照做，否则量的是"没有剪枝"的口径。
+// 建索引的耗时单独报（它会加到页面的"就绪时间"上，不能藏进查询时间里）。
+const tG = performance.now();
+ensureGrams(idx, 4);
+const tGrams = performance.now() - tG;
 
 const segSets = QUERIES.map((q) => q.split(/[;；|、+，,]+/).map(parseQuery).filter((s) => s.length >= 5));
 const times = [];
@@ -45,7 +50,7 @@ for (let i = 0; i < N; i++) {
 }
 
 console.log(`索引：${(raw.length / 1e6).toFixed(2)} MB 明文 · gzip 解压 ${(t1 - t0).toFixed(0)} ms · ` +
-            `buildIndex ${(t2 - t1).toFixed(0)} ms · 共 ${(t2 - t0).toFixed(0)} ms（${idx.songs.length} 首）`);
+            `buildIndex ${(t2 - t1).toFixed(0)} ms · ngram 倒排 ${tGrams.toFixed(0)} ms · 共 ${(t2 - t0 + tGrams).toFixed(0)} ms（${idx.songs.length} 首）`);
 console.log(`查询：${N} 次 · 中位 ${median(times).toFixed(1)} ms · p90 ${[...times].sort((a, b) => a - b)[Math.floor(N * 0.9)].toFixed(1)} ms · ` +
             `最快 ${Math.min(...times).toFixed(1)} ms`);
 console.log(`召回：最后一次返回 ${hits} 条 · 第一条「${top}」`);

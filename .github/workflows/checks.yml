@@ -78,6 +78,10 @@ jobs:
         run: node tools/check_jptok_js.mjs
       - name: 分享卡元数据检查
         run: node tools/check_og_meta.mjs
+      - name: ngram 剪枝等价性（结果必须与全扫逐条相同）
+        run: node tools/check_prune_parity.mjs 40
+      - name: wasm 逐首/端到端对拍（缺工具仓库产物时明确跳过）
+        run: node tools/check_wasm_parity.mjs
       - name: 性能基线（打印索引就绪与查询中位，供趋势对比）
         run: node tools/bench_search.mjs 20
 

@@ -1,4 +1,4 @@
-import { buildIndex, search } from './search.js';
+import { buildIndex, search, ensureGrams } from './search.js';
 import { parseQuery, parseToken, isPitch, show } from './jptok.js';
 import type { SearchResult, Index } from './search.js';
 /* 简谱旋律查歌 —— 主界面（路由 / 卡片 / 谱页 / 就地表单）
@@ -960,6 +960,12 @@ $<HTMLButtonElement>('sfill').addEventListener('click', function () {
 
 loadCorpus().then(function (txt) {
   IDX = buildIndex(txt);
+  // **ngram 倒排**（检索剪枝用）放到空闲时建：实测建它要 ~136 ms（2.5M 音符），
+  // 直接加在这儿会把"打开页面到能用"从 ~200 ms 推到 ~330 ms。
+  // 空闲建的时候页面已经可用了；没建好时检索走全扫 —— 结果完全一样（见 search.ts 的剪枝注释）。
+  setTimeout(function () {
+    try { if (IDX) ensureGrams(IDX, 4); } catch (e) { /* 建不起来就一直全扫 */ }
+  }, 800);
   return fetch(appUrl('data/stats.json')).then(function (r) { return r.json(); })
     .then(function (st) { loadPlatforms(st); loadFields(st); return st; });
 }).then(function (st) {

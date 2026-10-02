@@ -99,11 +99,11 @@ curl -s -X POST https://jianpu-db.org/api/submit -H 'Content-Type: application/j
 > 快速隧道（`*.trycloudflare.com`）**每次重启换地址**，正式用建议命名隧道绑 `api.jianpu-db.org`
 > （需要先跑一次 `cloudflared tunnel login` 点授权）。
 
-## 一·补三、404 语义（2026-10-02 定，别再改回去）
+## 一·补三、404 语义（2026-10-02 定）
 
 `wrangler.jsonc` 的 `not_found_handling = "single-page-application"` 会把**任何**找不到的路径
 用 `200 + index.html` 返回。这在"缺失假装成功"上非常危险（客户端把 HTML 当数据解析；
-自检只看状态码就被骗过去）。所以 Worker 里显式改成：
+只看状态码的自检无法发现这类问题）。所以 Worker 里显式改成：
 
 * **SPA 兜底只对页面路由生效**：`/`、`/index.html`、`/404.html`
   （页面级深链 `/s/<id>` 在此之前单独处理）；
@@ -189,4 +189,4 @@ node tools/check_jptok_js.mjs  # 前端 token 口径与 Python 侧一致
 * 同一批提交里 `checks` 与 `pages build and deployment` 都是 success，`build` 步骤也成功。
 
 **怎么办**：看下一条 run 的结论；仍是失败再查（先看 `build` 是否绿 —— build 绿说明产物没问题）。
-别因为一个红叉就去改构建脚本。
+先看下一条 run 的结论；`build` 步骤为绿时，产物本身没有问题。

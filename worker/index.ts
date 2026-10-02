@@ -219,6 +219,10 @@ export default {
                       upstreamOk: up.ok, upstreamErr: up.err,
                       og: og ? Object.keys(og).length : 0, ogErr: OG_ERR });
       }
+      if (path === '/api/gh' || path === '/api/stars') {
+        // ⚠ 必须在**通用代理之前**处理: 否则本机服务一停, 这个纯边缘接口也会跟着 502。
+        return await ghStars();
+      }
       return proxyApi(request, env, url);
     }
     // 「每谱一页」: 深链要给爬虫/分享平台看到**这一首**的标题（SPA 自己会渲染页面内容）
@@ -341,12 +345,52 @@ async function proxyFetch(request: Request, env: Env, target: string): Promise<R
   return new Response(res.body, { status: res.status, headers: out });
 }
 
-function json(obj: unknown, status = 200): Response {
+function json(obj: unknown, status = 200, maxAge = 0): Response {
   return new Response(JSON.stringify(obj), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8',
-               'cache-control': 'no-store', 'Access-Control-Allow-Origin': '*' },
+               // 默认 no-store（写接口那类绝不能缓存）；只有明确给了 maxAge 才允许缓存
+               'cache-control': maxAge > 0 ? 'public, max-age=' + maxAge : 'no-store',
+               'Access-Control-Allow-Origin': '*' },
   });
+}
+
+// ── GitHub Star 数（2026-10-02 加）────────────────────────────────────────────────
+// **为什么必须放服务端**: GitHub API 对未认证请求按来源 IP 限流 **60 次/小时** ——
+//   放前端 = 每个访客各打一次，人多就 403；放边缘 + 缓存 = 所有访客共用一份，且**缓存命中时根本不打 GitHub**。
+// **两层缓存**: ① 同 isolate 的内存（照 `ogIndex` 的做法）② Cloudflare 边缘缓存（`cf.cacheTtl`，
+//   跨 isolate、跨边缘节点，1 小时）。**只有成功才缓存**；失败不写内存缓存，并把 err 暴露出来
+//   （照 `/api/health` 的 `ogErr` 的先例: 报个数字，别让失败悄无声息）。
+const GH_REPO = 'jianpu-db/jianpu-db.github.io';   // 唯一**公开**的仓库（语料/工具仓库在别的账号下、未公开）
+const GH_TTL = 3600;                               // 成功: 1 小时
+let GH_MEM: { stars: number | null; at: number; err: string } | null = null;
+
+async function ghStars(): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  if (GH_MEM && now - GH_MEM.at < GH_TTL) {
+    return json({ ok: true, repo: GH_REPO, stars: GH_MEM.stars, err: '', cached: 'mem' }, 200, GH_TTL);
+  }
+  let stars: number | null = null;
+  let err = '';
+  try {
+    const r = await fetch('https://api.github.com/repos/' + GH_REPO, {
+      headers: { 'user-agent': 'jianpu-db-worker', accept: 'application/vnd.github+json' },
+      cf: { cacheTtl: GH_TTL, cacheEverything: true },       // ② 边缘缓存
+    });
+    if (!r.ok) {
+      err = 'HTTP ' + r.status;                              // 403 = 限流；404 = 仓库改名/转私有
+    } else {
+      const d = (await r.json()) as { stargazers_count?: number };
+      stars = typeof d.stargazers_count === 'number' ? d.stargazers_count : null;
+      if (stars === null) err = 'no stargazers_count';
+    }
+  } catch (e) {
+    err = (e as Error).message;
+  }
+  if (stars !== null) GH_MEM = { stars, at: now, err: '' };
+  // 失败时只让**客户端**缓存 5 分钟（好得快一点），绝不把失败钉一小时
+  return json({ ok: stars !== null, repo: GH_REPO, stars, err, cached: 'edge' },
+              200, stars !== null ? GH_TTL : 300);
 }
 
 /** /api/* 的 CORS 预检应答(204, 不带 body)。只放开这一个前缀; 其余路径不受影响。 */

@@ -14,6 +14,10 @@ h1 { font-size: 1.4rem; margin: 0 0 .45rem; }
   line-height: 1.5; background: #fff; }
 .ghbtn svg { display: block; flex: 0 0 auto; }
 .ghbtn:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+/* Star 数: 服务端接口填进来; 没拿到时这个 span 是 hidden, 不会留空位。 */
+.ghcount { display: inline-block; min-width: 1.5em; padding: 0 .34em; border-radius: 999px;
+  background: #f2f4f7; color: var(--dim); font-size: .82em; text-align: center; }
+.ghbtn:hover .ghcount { background: #e8f1fb; color: var(--accent); }
 h2 { font-size: 1rem; margin: 1.8rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
 p { margin: .45rem 0; }
 .lead { color: var(--dim); }

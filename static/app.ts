@@ -974,6 +974,16 @@ loadCorpus().then(function (txt) {
     st.notes.toLocaleString() + ' 个音符。';
   $('status').textContent = '就绪，共 ' + IDX.count + ' 首。';
   fillTagList();
+  // GitHub Star 数: **服务端**取并缓存 1 小时(见 worker/index.ts 的 ghStars)。
+  // 为什么不在前端直接打 GitHub: 未认证请求按来源 IP 限流 60 次/小时, 访客一多就 403。
+  // 镜像(GitHub Pages)与本地静态服务没有这个接口 -> 404/失败都**静默不显示**, 绝不影响页面。
+  fetch(appUrl('api/gh')).then(function (r) { return r.json(); }).then(function (d) {
+    var el = $('ghcount');
+    if (el && d && typeof d.stars === 'number' && d.stars > 0) {
+      el.textContent = String(d.stars);
+      el.hidden = false;
+    }
+  })['catch'](function () { /* 没拿到就不显示, 不是错误 */ });
   // 深链: 直接打开 /s/<id> 也要能渲出那一页(先把语料装上, 再按地址路由)
   if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('popstate', route);
   if (tuneIdFromLocation()) route();

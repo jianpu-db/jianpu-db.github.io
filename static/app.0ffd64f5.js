@@ -829,6 +829,16 @@ loadCorpus().then(function(txt) {
   $("stats").textContent = "语料 " + st.songs + " 首（" + st.groups + " 组），" + st.notes.toLocaleString() + " 个音符。";
   $("status").textContent = "就绪，共 " + IDX.count + " 首。";
   fillTagList();
+  fetch(appUrl("api/gh")).then(function(r) {
+    return r.json();
+  }).then(function(d) {
+    var el = $("ghcount");
+    if (el && d && typeof d.stars === "number" && d.stars > 0) {
+      el.textContent = String(d.stars);
+      el.hidden = false;
+    }
+  })["catch"](function() {
+  });
   if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("popstate", route);
   if (tuneIdFromLocation()) route();
   else showHome("");

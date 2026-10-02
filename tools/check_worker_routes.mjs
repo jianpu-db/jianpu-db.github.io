@@ -93,5 +93,56 @@ console.log('\n④ 深链 /s/<id>: 走注入分支（不是 404，也不是裸 i
   check(r.status === 200 && r.ct.includes('text/html'), `/s/jianpucn-150657 -> ${r.status} ${r.ct}`);
 }
 
+// ⑤ `/api/gh`（GitHub Star 数，服务端缓存）
+//    为什么必须测这条: 它**不经过本机后端**（代理之前处理），而且要用**替换全局 fetch** 的方式
+//    才能在不打真 GitHub 的前提下断言"取到了哪个数、失败时怎么报"。
+//
+//    ⚠ 顺序有讲究: **先测失败，再测成功**。因为设计上"失败不写内存缓存"，
+//      所以失败用例不会污染后面的缓存命中用例；反过来（先成功后失败）就会命中缓存、测不到失败路径。
+//      （Node 的模块缓存让"重新 import 拿一个新实例"这招无效 —— 我第一版就踩了这个。）
+console.log('\n⑤ /api/gh（Star 数走服务端 + 缓存；不碰本机后端）');
+{
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  const stub = (impl) => { globalThis.fetch = async (u, opt) => { calls.push(String(u)); return impl(u, opt); }; };
+
+  // (a) 403 限流 -> stars=null，err 如实暴露，客户端只缓存 5 分钟
+  stub(async () => new Response('rate limited', { status: 403 }));
+  let r = await worker.fetch(new Request('https://jianpu-db.org/api/gh'), env);
+  let d = await r.json();
+  check(r.status === 200 && d.stars === null && d.ok === false && /403/.test(d.err),
+        `403 限流被如实报告 -> stars=${d.stars} err=${JSON.stringify(d.err)}`);
+  check((r.headers.get('cache-control') || '').includes('max-age=300'),
+        `失败只让客户端缓存 5 分钟 -> ${r.headers.get('cache-control')}`);
+
+  // (b) 网络异常 -> 不能抛出去
+  stub(async () => { throw new Error('boom'); });
+  r = await worker.fetch(new Request('https://jianpu-db.org/api/gh'), env);
+  d = await r.json();
+  check(r.status === 200 && d.stars === null && /boom/.test(d.err),
+        `网络异常被吞成 err -> err=${JSON.stringify(d.err)}`);
+
+  // (c) 成功 -> 42，而且请求的是**正确的仓库**
+  calls.length = 0;
+  stub(async () => new Response(JSON.stringify({ stargazers_count: 42 }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  r = await worker.fetch(new Request('https://jianpu-db.org/api/gh'), env);
+  d = await r.json();
+  check(r.status === 200 && d.stars === 42 && d.ok === true && d.repo === 'jianpu-db/jianpu-db.github.io',
+        `/api/gh 成功 -> ${r.status} stars=${d.stars} repo=${d.repo}`);
+  check(calls.length === 1 && calls[0] === 'https://api.github.com/repos/jianpu-db/jianpu-db.github.io',
+        `请求的是对的仓库: ${calls[0]}`);
+  check((r.headers.get('cache-control') || '').includes('max-age=3600'),
+        `成功时客户端缓存 1 小时 -> ${r.headers.get('cache-control')}`);
+
+  // (d) 命中内存缓存 -> 不该再打 GitHub（别名 /api/stars 也认）
+  calls.length = 0;
+  r = await worker.fetch(new Request('https://jianpu-db.org/api/stars'), env);
+  d = await r.json();
+  check(d.stars === 42 && d.cached === 'mem' && calls.length === 0,
+        `/api/stars 命中内存缓存（没再打 GitHub，cached=${d.cached}）`);
+
+  globalThis.fetch = realFetch;   // 还原，别把后面/别的检查搞坏
+}
+
 console.log(`\n${fail === 0 ? '通过' : '失败 ' + fail + ' 项'}（共 ${pass + fail} 项）`);
 process.exit(fail ? 1 : 0);

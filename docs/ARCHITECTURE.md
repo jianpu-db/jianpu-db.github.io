@@ -147,6 +147,13 @@ link=https://…           # 人工核对过的收录页（搜索页会被拒收
 统一返回 `{ok, id, state, committed, refresh, refresh_msg}`；`/api/health` 另外暴露
 `token_required`、`upstream`、`og`（分享卡索引条数 —— 用它一眼看出"每谱注入是不是还活着"）。
 
+**纯边缘、不经本机后端的两个只读接口**（它们排在通用代理**之前**处理，所以本机服务停着也照样可用）：
+
+| 路径 | 返回 | 缓存 |
+|---|---|---|
+| `/api/gh`（别名 `/api/stars`） | `{ok, repo, stars, err, cached}` —— GitHub Star 数 | 成功 **1 小时**；失败只 5 分钟 |
+| 为什么放服务端 | GitHub API 对未认证请求按**来源 IP** 限流 60 次/小时 → 放前端等于每个访客各打一次，人多就 403 | 两层：isolate 内存（`cached:"mem"`）+ 边缘（`cf.cacheTtl`，`cached:"edge"`） |
+
 ## 四、部署拓扑（两份产物、三种运行位置）
 
 | 位置 | 是什么 | 能力 |

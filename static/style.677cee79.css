@@ -5,6 +5,15 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans SC"
        margin: 0; color: var(--fg); background: #fff; line-height: 1.65; font-size: 16px; }
 .wrap { max-width: 52rem; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; }
 h1 { font-size: 1.4rem; margin: 0 0 .45rem; }
+
+/* 右上角 GitHub 入口。用站点自己的变量(--dim/--line/--accent), 不引外部图标字体/图片。
+   移动端只占一行右侧, 不挤标题(靠 flex-end 右对齐)。 */
+.topbar { display: flex; justify-content: flex-end; }
+.ghbtn { display: inline-flex; align-items: center; gap: .38rem; padding: .22rem .62rem;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--dim); font-size: .85rem;
+  line-height: 1.5; background: #fff; }
+.ghbtn svg { display: block; flex: 0 0 auto; }
+.ghbtn:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
 h2 { font-size: 1rem; margin: 1.8rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
 p { margin: .45rem 0; }
 .lead { color: var(--dim); }

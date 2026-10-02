@@ -92,14 +92,18 @@ def group_of(t):
     return re.split(r"[（(\s　【\[《]", base)[0].strip() or base.strip()
 
 
-# ── 归组归一化（**可选**，`JP_GROUP_NORM=1` 才生效）──────────────────────────────
+# ── 归组归一化（**默认开**，`JP_GROUP_NORM=0` 可关）────────────────────────────
 # 为什么需要: 上面的 group_of 只在第一个括号/空格处截断，于是同一首歌会分成几个组 ——
 #   `Amani` / `AMANI`（大小写）、`Love` / `love`、`中国_中国` / `中国，中国`（标点/下划线）。
 #   用户搜同一首歌会看到两个组，而且"版本多优先"那条并列依据会被灌水。
 # 实测（2026-10-02, tools/check_dup_groups.mjs）: 23 个组名被拆成 46 个组；归一化后 8625 -> 8602 组，
 #   7 条旋律查询的代价/位置/精确计数**逐条不变**（证明它只动组名、不动音符）。
-# 为什么默认关: 显示名取哪一种写法是**产品口味**（`AMANI` 还是 `Amani`？），不该由构建脚本替用户定。
-#   实现与验证都在，一条环境变量即可启用:  JP_GROUP_NORM=1 重建索引。
+# 2026-10-02 晚的决定: **默认开**（原来默认关，理由是"显示名取哪种写法是产品口味"）。
+#   改默认的依据: 拆组是**用户可见的错**（同一首歌搜出两个组、版本并列被灌水），而显示名只在
+#   `AMANI`/`Amani` 这种大小写间挑一个，取"出现次数最多 → 不带下划线/标点 → 更短"。
+#   落实时的实测（同一份语料 11495 行）: 23/{8602} 个组名合并、24 行改组名、共 8602 组；
+#   音符 2,282,964 / 含变音 20 首 / 带原谱 11495 首 —— 与关闭时**逐项相同**（只动组名）。
+#   想回到旧口径:  JP_GROUP_NORM=0 py -3.13 tools/build_web_data.py
 _JUNK_SUFFIX = ("简谱", "歌谱", "五线谱", "正谱", "完整版", "弹唱", "吉他谱", "钢琴谱", "歌曲类", "简和谱")
 
 
@@ -288,10 +292,10 @@ def main():
                         and str(r["conf_p10"]).replace(".", "", 1).isdigit() else None),
         })
 
-    # 归组归一化（可选，`JP_GROUP_NORM=1`）: 在写文件**之前**把 `g` 统一到规范显示名。
+    # 归组归一化（默认开，`JP_GROUP_NORM=0` 关）: 在写文件**之前**把 `g` 统一到规范显示名。
     # 为什么放在这里: 显示名要按"整份语料里哪种写法最多"来定（`AMANI` 2 次 vs `Amani` 1 次），
     # 所以必须等所有行都收齐了再决定，不能在逐行循环里就地改。
-    if os.environ.get("JP_GROUP_NORM") == "1":
+    if os.environ.get("JP_GROUP_NORM", "1") != "0":
         canon = canonical_group_names([r["g"] for r in rows])
         merged = {}
         for r in rows:
@@ -300,7 +304,7 @@ def main():
             r["g"] = new
             if new != old:
                 merged[new] = merged.get(new, 0) + 1
-        print("  归组归一化(JP_GROUP_NORM=1): %d/{%d} 个组名被合并，%d 行改了组名，共 %d 组"
+        print("  归组归一化(默认开, JP_GROUP_NORM=0 可关): %d/{%d} 个组名被合并，%d 行改了组名，共 %d 组"
               % (len(merged), len(canon), sum(merged.values()), len({r["g"] for r in rows})))
 
     outj = os.path.join(a.out, "songs.jsonl.gz")

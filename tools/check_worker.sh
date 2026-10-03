@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# ⚠ 本机（Windows/Git Bash）跑这个脚本会**假红**两处，CI（Linux）上不会：
+#   1) 没有 geckodriver -> 真浏览器那两项直接跳过；
+#   2) wrangler dev 起在 http 上，/img/* 会先吃到 http->https 的 301，而判据期望 503+两条路 ——
+#      本机又没绑 R2 / IMG_UPSTREAM，所以这两条在本机必然红。看 CI 的结论为准。
 # 把 Cloudflare **部署形态**真跑一遍（wrangler dev --local = 真 workerd + 本地 R2）：
 #   静态资源(带内容哈希) / `/s/<id>` 深链回退 / `/img/*` 的三种可能 / 越界不泄露 / 投稿提示。
 # 为什么值得单列: 部署到 Cloudflare 之前, 这些路径在本机就能验; 不然只能"推上去看运气"。
@@ -32,13 +36,25 @@ cleanup() {
   # ⚠ 必须杀**整个进程组**: `npx wrangler dev` 底下是 npx → node(cli.js) → workerd 三层,
   #   只 kill $! 或只 pkill -P $! 都会留下 workerd 占着 8787 和本地 R2 的 sqlite,
   #   下一次跑就"起不来"（实测踩过）。setsid 让它自成进程组, 于是 kill -- -PGID 一把清干净。
-  kill -- "-$WPID" 2>/dev/null
+  if [ "${WGROUP:-1}" = 1 ]; then
+    kill -- "-$WPID" 2>/dev/null
+  else
+    MSYS_NO_PATHCONV=1 taskkill //PID "$WPID" //T //F >/dev/null 2>&1 || kill "$WPID" 2>/dev/null
+  fi
   wait "$WPID" 2>/dev/null
 }
 trap cleanup EXIT
 
-setsid npx wrangler dev --port "$PORT" --local > "$LOG" 2>&1 &
-WPID=$!            # setsid 之后 $! 就是新进程组的组长, cleanup 用 -$WPID 杀全组
+# Git Bash / MSYS 没有 setsid（util-linux 的），退回直接起 + 用 taskkill 杀整棵子树。
+if command -v setsid >/dev/null 2>&1; then
+  setsid npx wrangler dev --port "$PORT" --local > "$LOG" 2>&1 &
+  WPID=$!
+  WGROUP=1        # setsid 之后 $! 就是新进程组的组长, cleanup 用 -$WPID 杀全组
+else
+  npx wrangler dev --port "$PORT" --local > "$LOG" 2>&1 &
+  WPID=$!
+  WGROUP=0
+fi
 for i in $(seq 1 60); do
   grep -q "Ready on" "$LOG" && break
   kill -0 "$WPID" 2>/dev/null || { echo "!! wrangler dev 起不来:"; tail -5 "$LOG"; exit 1; }

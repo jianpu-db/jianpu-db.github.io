@@ -18,7 +18,7 @@
 
 ```mermaid
 flowchart LR
-  subgraph DEV["作者本机（你的电脑）"]
+  subgraph DEV["转写流水线 ・ 语料 ・ 写后端"]
     PIPE["转写流水线<br/>Qwen3-VL-2B + PyTorch"]
     CORPUS[("语料仓库<br/>曲谱 + data.jsonl")]
     API["写后端<br/>FastAPI /api/*"]
@@ -47,7 +47,7 @@ flowchart LR
 
 | 位置 | 是什么 | 承担什么 |
 |---|---|---|
-| **作者本机** | 语料仓库 + 转写流水线（Qwen3-VL-2B / PyTorch）+ FastAPI 写后端 | 生产曲谱；受理投稿并写回语料 |
+| **本机** | 语料仓库 + 转写流水线（Qwen3-VL-2B / PyTorch）+ FastAPI 写后端 | 生产曲谱；受理投稿并写回语料 |
 | **GitHub** | 站点仓库 `jianpu-db.github.io`（前端源码 + 构建产物）；同一仓库用 Pages 发布 | 源码托管；提供**只读镜像**入口 |
 | **Cloudflare** | Worker + Assets 承载 **jianpu-db.org** | 正式站：静态资源、每谱 meta 注入、`/api/*` 反向代理 |
 

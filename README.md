@@ -59,18 +59,6 @@ flowchart LR
 一份简谱语料，加一个按旋律找歌的检索站。曲谱由视觉语言模型（Qwen3-VL-2B）从扫描件转写而来。
 输入你记得的几个音，比如 `5 5 6 5 3 2 1`，它从全库 11,380 首里按代价排序给出候选。
 
-## 技术文档（面试 / 评审向）
-
-| 文档 | 内容 |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 全链路架构图、组件职责、数据契约（曲谱文件 / 索引字段 / 写接口）、部署拓扑、瓶颈与扩展 |
-| [docs/TECH_STACK.md](docs/TECH_STACK.md) | 分层选型与理由、量化收益、"刻意没用"的清单、15 条难题复盘、20 条问答 |
-| [docs/QA.md](docs/QA.md) | 质量工程：自检脚本清单、判据与证据、运行位置 |
-| [docs/交付总结.md](docs/交付总结.md) | 交付总结：五个阶段做了什么、实测数字、被数据否决的尝试 |
-| [docs/MOCK_INTERVIEW.md](docs/MOCK_INTERVIEW.md) | 面试演练稿：自我介绍、追问与追问的追问、规模问题、数字速查、复现命令 |
-| [docs/RESUME.md](docs/RESUME.md) | 中英文简历要点与需提前准备的追问 |
-| [DEPLOY.md](DEPLOY.md) | 域名 / 边缘 / 隧道 / 写后端的部署手册 |
-
 ## 技术栈（一句话）
 
 TypeScript 前端（零运行时依赖，检索全部在浏览器内完成）+ Cloudflare Workers 边缘 + FastAPI 写后端

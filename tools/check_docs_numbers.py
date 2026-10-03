@@ -16,7 +16,9 @@ import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.environ.get("JIANPU_DB") or os.path.join(os.path.dirname(ROOT), "jianpu-db")   # 与 server.py 同规矩: 环境变量优先
-DOCS = ("README.md", "docs/TECH_STACK.md", "docs/ARCHITECTURE.md", "docs/RESUME.md")
+# 有些技术文档只放本机、不进仓库（见 .gitignore），所以只检查**工作区里存在**的那几份。
+DOCS = tuple(d for d in ("README.md", "docs/TECH_STACK.md", "docs/ARCHITECTURE.md", "docs/RESUME.md")
+             if os.path.isfile(os.path.join(ROOT, d)))
 
 
 def corpus_numbers():

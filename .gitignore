@@ -21,3 +21,11 @@ static/.build/
 .ruff_cache/
 .mypy_cache/
 __pycache__/
+
+# 面试 / 评审向的技术文档：只放本机，不进仓库（2026-10-04）
+docs/ARCHITECTURE.md
+docs/TECH_STACK.md
+docs/QA.md
+docs/交付总结.md
+docs/MOCK_INTERVIEW.md
+docs/RESUME.md

@@ -1,6 +1,6 @@
 # jianpu-db · 简谱旋律查歌
 
-**只哼开头几个音，把这首歌的简谱找出来。** 检索完全在浏览器里跑，不上传、不留痕。
+**只哼开头几个音，把这首歌的简谱找出来。**
 
 [![曲谱](https://img.shields.io/badge/%E6%9B%B2%E8%B0%B1-11%2C380%20%E9%A6%96-0b62c4)](https://jianpu-db.org/)
 [![音符](https://img.shields.io/badge/%E9%9F%B3%E7%AC%A6-2%2C528%2C861-0b62c4)](https://jianpu-db.org/)

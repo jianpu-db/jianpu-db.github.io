@@ -97,7 +97,7 @@ def main():
            font=f_small, fill=DIM)
 
     # —— 底部实测数字（一行放得下就行；放不下就缩短，**不要**再往右塞东西）——
-    s = f"{n_songs:,} 首简谱 · {n_notes:,} 个音符 · 检索全在你的浏览器里跑，不上传、不留痕"
+    s = f"{n_songs:,} 首简谱 · {n_notes:,} 个音符"
     while d.textlength(s, font=f_small) > W - 128 and len(s) > 12:
         s = s[:-1]
     d.text((64, H - 78), s, font=f_small, fill=DIM)

@@ -2,9 +2,9 @@
 
 **只哼开头几个音，把这首歌的简谱找出来。** 检索完全在浏览器里跑，不上传、不留痕。
 
-[![曲谱](https://img.shields.io/badge/%E6%9B%B2%E8%B0%B1-11%2C495%20%E9%A6%96-0b62c4)](https://jianpu-db.org/)
-[![音符](https://img.shields.io/badge/%E9%9F%B3%E7%AC%A6-2%2C532%2C332-0b62c4)](https://jianpu-db.org/)
-[![小节线](https://img.shields.io/badge/%E6%98%BE%E5%BC%8F%E5%B0%8F%E8%8A%82%E7%BA%BF-552%2C836-0b62c4)](https://jianpu-db.org/)
+[![曲谱](https://img.shields.io/badge/%E6%9B%B2%E8%B0%B1-11%2C380%20%E9%A6%96-0b62c4)](https://jianpu-db.org/)
+[![音符](https://img.shields.io/badge/%E9%9F%B3%E7%AC%A6-2%2C528%2C861-0b62c4)](https://jianpu-db.org/)
+[![小节线](https://img.shields.io/badge/%E6%98%BE%E5%BC%8F%E5%B0%8F%E8%8A%82%E7%BA%BF-551%2C939-0b62c4)](https://jianpu-db.org/)
 [![索引](https://img.shields.io/badge/%E7%B4%A2%E5%BC%95-5.12%20MB%20gz-177245)](https://jianpu-db.org/)
 [![查询](https://img.shields.io/badge/%E6%9F%A5%E8%AF%A2%E4%B8%AD%E4%BD%8D-106%20ms-177245)](https://jianpu-db.org/)
 [![Top-1](https://img.shields.io/badge/%E9%87%91%E6%9B%B2%E6%A6%9C%20L%3D15%20%E9%94%990%20Top--1-98.9%25-177245)](https://jianpu-db.org/)
@@ -58,7 +58,7 @@ flowchart LR
 
 一份**简谱语料**加一个**旋律检索站**：曲谱由视觉语言模型（Qwen3-VL-2B）从扫描件转写而来，
 检索不是"按歌名搜"，而是**按旋律**——输入你记得的那几个音（如 `5 5 6 5 3 2 1`），
-从全库 11,495 首里按"代价"排序找出候选。**计算全部发生在浏览器里**，服务器只发一份索引。
+从全库 11,380 首里按"代价"排序找出候选。**计算全部发生在浏览器里**，服务器只发一份索引。
 
 ## 技术文档（面试 / 评审向）
 

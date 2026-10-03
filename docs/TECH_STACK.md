@@ -7,10 +7,10 @@
 
 | 指标 | 数值 |
 |---|---|
-| 曲谱语料 | **11,495 首** · **2,532,332 个音符** · **552,836 条显式小节线** · 11,991 份曲谱文件 |
+| 曲谱语料 | **11,380 首** · **2,528,861 个音符** · **551,939 条显式小节线** · 11,876 份曲谱文件 |
 | 平均每首 | 220 音符 |
 | 检索索引 | `songs.jsonl.gz` **5.12 MB**（gzip）→ 31.01 MB 明文（**6.1×**） |
-| 浏览器就绪 | gzip 解压 **56 ms** + 建索引 **148 ms** = **204 ms**（11,495 首） |
+| 浏览器就绪 | gzip 解压 **56 ms** + 建索引 **148 ms** = **204 ms**（11,380 首） |
 | 单次查询 | 中位 **106 ms** · p90 114 ms · 最快 63 ms（同一份前端代码，30 次；**E 阶段优化后**——优化前是 144.6/169.7） |
 | 转写吞吐 | 每份中位 **38–61 s**；**59–95 份/小时**（GPU 单卡、串行） |
 | 中间产物 | 8,847 张批注图 / 5.63 GB；扫描件 56,259 个文件 |
@@ -53,7 +53,7 @@
 | **Worker 用 TypeScript**（2026-10-01） | 边缘代码负责路由/鉴权/注入，出错就是"整站不可用"；类型能挡住一整类错误 | 入口 `worker/index.ts`（`wrangler` 自己 esbuild 打包）；单独 `tsconfig.worker.json`（`@cloudflare/workers-types`，不能和 DOM lib 混） |
 | **`/api/health` 探上游（`upstreamOk`）** | 快速隧道会**悄悄死掉**而 secret 仍在 —— 只报 `api:true` 会骗人 | 2026-10-01 实测: 隧道 `Error 1016`，health 却一直 `api:true`，看护几小时没报；现在健康检查真去敲一下上游（3 s 超时） |
 | **`assets.run_worker_first`** | `/s/<id>` 靠 SPA 回退，默认**不过 Worker** | 不设它 → 每谱注入**静默失效**（页面照常打开） |
-| **每谱注入 meta（Edge SSR-lite）** | 爬虫不跑 JS；1.1 万个谱页否则"同一份 HTML" | `data/og.json` 11,495 条，`/s/<id>` 各有 `<title>`/OG/canonical |
+| **每谱注入 meta（Edge SSR-lite）** | 爬虫不跑 JS；1.1 万个谱页否则"同一份 HTML" | `data/og.json` 11,380 条，`/s/<id>` 各有 `<title>`/OG/canonical |
 | **Cloudflare Tunnel + 本机写服务** | 写盘/`git commit` 必须在本机；但读要边缘 | 边缘反代 + `X-Token`；`vars` 与 `secret` 同名会报 **code 10053** |
 | **FastAPI + Pydantic v2**（2026-10-01 C 阶段） | 写后端要的是**类型化契约 + 自动文档**：投稿 4 种载荷从「字典里摸 key」变成可校验模型，`/docs`（Swagger）由代码生成 | 业务口径**一行没重写**（全部 import 自 `app/server.py`）；4 种 kind 用 discriminated union 表达；错误文案/状态码/CORS 与旧版逐项对齐（见下条） |
 | **灰度对拍矩阵** `tools/check_parity_legacy_vs_fastapi.py` | 换传输层最危险的是**边角行为**（预检状态码、404 的 body、越界拒绝、坏 JSON 文案、body 上限、**鉴权与解析的先后**） | 21 条用例 × 三种鉴权场景（无口令/错口令/对口令，后者会真写）**全部一致**；对拍过程当场抓到 4 类差异（含一处**鉴权顺序**差异：新版原本先报 400 解析错、旧版先报 403） |
@@ -61,7 +61,7 @@
 | **Docker + Compose**（一条命令起） | 换机器/进 CI 要能"一条命令复现环境"，而不是靠人记三条命令 | `Dockerfile`（多阶段: uv 依赖层 + 运行层、非 root、`HEALTHCHECK` 用应用自己的 `/api/health`）+ `docker-compose.yml`（`api` + `tunnel` profile；**语料挂卷不烤进镜像**；口令不给默认值，缺了就报错停下）。⚠ 本机**没装 Docker**，所以本机做的是"步骤等价性"验证（干净目录跑依赖层 `uv sync --frozen` → 31 包；再用那套 venv 一字不改跑 Dockerfile 的 HEALTHCHECK），**真正的镜像构建放在 CI 的 `docker` job** |
 | **ruff + mypy 渐进门槛** | 新代码要有风格/类型底线，但历史 60+ 脚本全量开会淹没真问题 | `tools/lint_python.py`（唯一真源，pre-commit 与 CI 都调它）: 本次现代化产出的 5 个文件过 ruff、`app/api.py` 过 mypy；`app/server.py` 用 per-file-ignores 登记在案（它是"随时可退回"的备份实现，为风格动它纯风险） |
 | **pre-commit** | 让"提交前就该发现的问题"在提交前发现 | 官方文件卫生钩子 + 4 个本地钩子（python 门槛 / `npm run typecheck` / 文档数字对账 / 前端检索用例）；实测 **11 个钩子全过**（tsc 与 search-check 都真跑过） |
-| **Prometheus `/metrics`** | "投稿有没有在进来""上游还活着吗"以前只能翻日志 | 官方客户端；`jianpu_http_requests_total{method,path,status}`（**路径用归一化模板**，否则 1.1 万谱页会把时间序列炸掉）+ 耗时直方图 + `jianpu_submissions_total{kind,result}` + 语料规模 gauge。真语料实测 `jianpu_corpus_songs 11495` ✓，用官方解析器校验 **14 个指标族**全部合规 |
+| **Prometheus `/metrics`** | "投稿有没有在进来""上游还活着吗"以前只能翻日志 | 官方客户端；`jianpu_http_requests_total{method,path,status}`（**路径用归一化模板**，否则 1.1 万谱页会把时间序列炸掉）+ 耗时直方图 + `jianpu_submissions_total{kind,result}` + 语料规模 gauge。真语料实测 `jianpu_corpus_songs 11380` ✓，用官方解析器校验 **14 个指标族**全部合规 |
 | **GitHub Actions 三条流水线** | 本地绿 ≠ CI 绿（D 阶段就被这条打脸，见 STAR 第 10 条） | `checks.yml`: `web`（node 20/22 × 三份 tsconfig + 前端自检 + 性能基线）、`python`（3.11/3.13 × 门槛 + 投稿漏斗 + **起两个实现跑 21 条对拍** + 文档对账）、`docker`（**真构建镜像**并起来打 `/api/health`、`/metrics`） |
 | **GitHub Pages 只读镜像 + Actions** | 多一个入口 + 备份 + 老链接不断 | `canonical` 指正式域名，避免被判重复内容 |
 
@@ -180,10 +180,10 @@ D 阶段把质量门搬到 CI 之后，连着暴露了三个问题，**没有一
 ② 测试不能依赖运行环境（语言、时区、locale、Node 版本特性），否则它会用"随机红"训练人忽略信号。
 ### 12. 性能优化的定位：先量后改 —— Rust→Wasm 的尝试与真正的瓶颈
 
-* **S**：查询中位 **144.6 ms**。我一直以为瓶颈是"11,495 首 / 2.5M 音符的全库匹配扫描"，
+* **S**：查询中位 **144.6 ms**。我一直以为瓶颈是"11,380 首 / 2.5M 音符的全库匹配扫描"，
   于是装了 Rust（`rustup` + `wasm32-unknown-unknown`）、写了 wasm 内层代价循环（**0.9 KB**，零依赖、不用 wasm-bindgen）。
 * **A**：
-  1. 先建**逐首对拍**（`tools/check_wasm_parity.mjs`）：12 条查询 × 11,495 首 = **137,940 次**单曲比较，
+  1. 先建**逐首对拍**（`tools/check_wasm_parity.mjs`）：12 条查询 × 11,380 首 = **137,940 次**单曲比较，
      比 `(cost, at)` —— **代价逐首完全一致**；只有 123 处 `at` 不同，且**全部**是"同代价按段落权更换窗"
      （副歌优先于前奏，那段产品口径刻意留在 TS）；
   2. 再建**端到端对拍**（表快路径 vs 纯 TS 全扫，含多段查询）：15 条查询的最终卡片**逐条相同**；

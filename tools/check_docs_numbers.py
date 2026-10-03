@@ -11,14 +11,24 @@ import glob
 import gzip
 import json
 import os
+import subprocess
 import sys
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.environ.get("JIANPU_DB") or os.path.join(os.path.dirname(ROOT), "jianpu-db")   # 与 server.py 同规矩: 环境变量优先
 # 有些技术文档只放本机、不进仓库（见 .gitignore），所以只检查**工作区里存在**的那几份。
+
+def _tracked(rel):
+    """只检查仓库里跟踪的文档：有几份技术文档按 .gitignore 只留本机。"""
+    if not os.path.isfile(os.path.join(ROOT, rel)):
+        return False
+    r = subprocess.run(["git", "check-ignore", "-q", rel], cwd=ROOT)
+    return r.returncode != 0          # 被忽略 -> 不算
+
+
 DOCS = tuple(d for d in ("README.md", "docs/TECH_STACK.md", "docs/ARCHITECTURE.md", "docs/RESUME.md")
-             if os.path.isfile(os.path.join(ROOT, d)))
+             if _tracked(d))
 
 
 def corpus_numbers():
@@ -51,7 +61,7 @@ def main():
     idx = len(index_rows())
     # ⚠ 用**列表**而不是 dict: 曲数与索引行数实测是同一个数(11,495), 用 dict 当 key 会互相覆盖 ——
     #   第一版就是这么写的, 结果 RESUME 被判"缺曲数"(其实它写了)。自查发现的。
-    must = [(f"{n:,}", "曲数"), (f"{notes:,}", "音符数"), (f"{bars:,}", "显式小节线数")]
+    must = [(f"{n:,}", "曲数"), (f"{notes:,}", "音符"), (f"{bars:,}", "小节线")]
     if idx:
         must.append((f"{idx:,}", "索引行数"))
     print(f"实测: 曲数 {n:,} · 音符 {notes:,} · 小节线 {bars:,} · 曲谱文件 {files:,}"

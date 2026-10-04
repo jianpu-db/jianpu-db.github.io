@@ -39,7 +39,7 @@ repos:
         entry: .venv/Scripts/python.exe tools/lint_python.py
         language: system
         pass_filenames: false
-        files: ^(app/api\.py|tools/(lint_python|check_parity_legacy_vs_fastapi|check_docs_numbers|make_isolated_db)\.py|pyproject\.toml)$
+        files: ^(app/(api|search_api)\.py|tools/(lint_python|check_parity_legacy_vs_fastapi|check_docs_numbers|make_isolated_db)\.py|pyproject\.toml)$
 
       # 前端/Worker 的类型检查（B 阶段引入的三份 tsconfig）
       - id: tsc

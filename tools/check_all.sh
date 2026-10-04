@@ -30,6 +30,9 @@ run python3 tools/check_docs_numbers.py       # 文档里的数字必须与语�
 run node tools/check_prune_parity.mjs 60
 run node tools/check_wasm_parity.mjs
 run node tools/check_worker_routes.mjs
+# 只读检索 API（GET /api/search）：脚本**自起一份 app/server.py**（自挑空闲端口、跑完收干净），
+# 所以它同样不吃 $URL，也不会被本机 8770 是不是活着牵连；旁边没有语料/工具仓库时它自己跳过。
+run node tools/check_search_api.mjs
 # 归组重复是**报告**不是门槛（它报的是"用户可见的重复"，那是产品决策不是 bug），所以只打印:
 echo; echo "=== 归组重复报告（非门槛）==="
 node tools/check_dup_groups.mjs 2>&1 | tail -n 6

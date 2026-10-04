@@ -40,6 +40,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import search_api  # noqa: E402  —— 复用同一份只读检索口径（标准库版也 import 它）
 import server  # noqa: E402  —— 复用同一份口径（校验/落库/git/重建索引）
 
 VERSION = "c1"  # C 阶段第 1 版
@@ -322,6 +323,18 @@ async def health() -> JSONResponse:
                        "token_required": bool(server.TOKEN),
                        "images": [os.path.basename(r) for r in server.IMG_ROOTS],
                        "server": "fastapi", "version": VERSION})
+
+
+@app.get("/api/search", summary="只读旋律检索（按旋律数字串查歌）")
+async def search_endpoint(request: Request) -> JSONResponse:
+    """`?q=<旋律>&fuzzy=0&top=20` —— 只读，不需要 `X-Token`（中间件那道闸只管 `POST /api/submit`）。
+
+    口径（参数校验 / 缓存 / 限流 / 输出的 JSON 形状）**只有一份**，在 `app/search_api.py`，
+    与标准库版 `app/server.py` 共用，所以两边的状态码与文案不会走偏。
+    """
+    code, out, headers = search_api.handle(request.url.query,
+                                           request.client.host if request.client else "")
+    return JSONResponse(status_code=code, content=out, headers=headers)
 
 
 @app.post("/api/submit", summary="投稿 / 补收录页 / 补标签 / 补属性")

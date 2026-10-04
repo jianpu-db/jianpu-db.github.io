@@ -29,12 +29,13 @@ ROOT = os.path.dirname(HERE)
 # **门槛名单**（唯一真源：pre-commit 与 CI 都调这个脚本，别在两处各写一遍）
 MODERN = [
     "app/api.py",                                  # C 阶段: FastAPI 写后端
+    "app/search_api.py",                           # 只读检索口径(两份后端共用)
     "tools/check_parity_legacy_vs_fastapi.py",     # C 阶段: 灰度对拍矩阵
     "tools/check_docs_numbers.py",                 # A 阶段: 文档数字对账
     "tools/lint_python.py",                        # 本文件
     "tools/make_isolated_db.py",                   # D 阶段: 隔离语料库生成器(对拍/CI 用)
 ]
-MYPY_SCOPE = ["app/api.py"]                        # 类型检查只做新写后端（配置在 pyproject 的 [tool.mypy]）
+MYPY_SCOPE = ["app/api.py", "app/search_api.py"]   # 类型检查只做新写后端（配置在 pyproject 的 [tool.mypy]）
 
 # 历史文件（登记在案，逐步纳入；不是为了"眼不见为净"）：
 LEGACY_NOTE = (

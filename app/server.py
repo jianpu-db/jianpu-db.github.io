@@ -10,6 +10,8 @@
       kind: "new"(推荐收录) / "fix"(纠错) / "meta"(元数据: 曲名/出处/标签不对)
       成功 -> 写入 jianpu-db/scores/ 或 feedback/ 并 git commit, 返回 {ok, id}
   GET  /api/health   -> {ok, repo, feedback_count}
+  GET  /api/search?q=<旋律>&fuzzy=0&top=20  -> 只读检索(按旋律数字串查歌)
+      参数/限流/缓存的口径全在 app/search_api.py(与 FastAPI 版共用同一份)
   GET  /s/<id>       -> 单页应用(: 每首谱的独立页面, 前端按 id 渲原图/元数据)
   GET  /img/<路径>   -> 原图(路径相对**工作区根**, 如 images-prep/批次/标题__source/001.jpg)
 
@@ -127,6 +129,12 @@ try:
 except Exception:                       # DB 路径不对 -> 宁可拒绝写, 也不写未校验的 URL
     linkurl = None
 HERE_WEB = ROOT
+# 只读检索的口径**只有一份**(app/search_api.py), 两份后端都 import 它。先把自己的目录放进
+# sys.path —— 这个文件也会被 tools/check_submit.py 用 spec_from_file_location 加载, 那时
+# 脚本目录不在 sys.path 里, 直接 import 会 ImportError。
+sys.path.insert(0, os.path.join(ROOT, "app"))
+import search_api  # noqa: E402
+
 REFRESH_LOG = os.path.join(HERE_WEB, "data", "refresh.log")
 REFRESH_LOCK = os.path.join(HERE_WEB, "data", ".refresh.lock")
 REFRESH_PENDING = os.path.join(HERE_WEB, "data", ".refresh.pending")
@@ -626,12 +634,14 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s  %s\n" % (self.address_string(), fmt % args))
 
-    def _json(self, code, obj):
+    def _json(self, code, obj, headers=None):
         b = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in (headers or {}).items():       # 限流的 Retry-After 走这里(默认没有额外头)
+            self.send_header(k, str(v))
         self.end_headers()
         self.wfile.write(b)
 
@@ -692,6 +702,13 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "repo": DB, "feedback_count": n,
                                     "token_required": bool(TOKEN),
                                     "images": [os.path.basename(r) for r in IMG_ROOTS]})
+        if path == "/api/search":
+            # 只读检索: 参数校验/缓存/限流全在 app/search_api.py(与 FastAPI 版同一份口径),
+            # 这里只把查询串与客户端 IP 递进去。**不动**下面的静态兜底与写路径。
+            code, out, headers = search_api.handle(
+                self.path.split("?", 1)[1] if "?" in self.path else "",
+                self.client_address[0] if self.client_address else "")
+            return self._json(code, out, headers)
         if path.startswith(IMG_PREFIX):
             full = resolve_img(path[len(IMG_PREFIX):])
             if not full:

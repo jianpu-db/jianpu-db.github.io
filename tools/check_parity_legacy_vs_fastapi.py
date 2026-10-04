@@ -43,6 +43,14 @@ CASES = [
      "搜索页 -> 拒收"),
     ("POST", "/api/submit", b'{"kind":"unknown-kind","title":"x"}', "未知 kind（**有意差异**）"),
     ("GET", "/api/nope", None, "不存在的 api -> 404"),
+    # 只读检索 API（两份后端共用 app/search_api.py，这里锁住 HTTP 层的行为一致）
+    ("GET", "/api/search?q=316%20316%2031656564&top=3", None, "检索：多段查询"),
+    ("GET", "/api/search?q=1234567&fuzzy=0&top=5", None, "检索：普通查询"),
+    ("GET", "/api/search?q=12345671234567123456", None, "检索：合法但查不到（count=0 仍是 200）"),
+    ("GET", "/api/search?q=99999999999999999999", None, "检索：非法数字 -> 400"),
+    ("GET", "/api/search", None, "检索：缺 q -> 400"),
+    ("GET", "/api/search?q=12&fuzzy=9", None, "检索：fuzzy 非法 -> 400"),
+    ("GET", "/api/search?q=12345&top=0", None, "检索：top=0 被钳到 1"),
 ]
 
 

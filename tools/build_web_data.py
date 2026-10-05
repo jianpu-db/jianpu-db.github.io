@@ -55,19 +55,20 @@ def _sections_compact(r, n_notes):
             if t == "~":
                 tie = last_note
                 continue
-            if not parse(t):                 # 非音符 token: parse 可能直接返回 None
+            ns = parse_all(t)
+            if not ns:                       # 非音符 token: 不是合法 token 时返回 []
                 tie, prev_key, last_note = False, None, False
                 continue
-            d, ac, _o = parse(t)
-            if d is None:
-                tie, prev_key, last_note = False, None, False
-                continue
-            key = (d, ac)
-            if tie and prev_key == key:
-                tie, last_note = False, True
-                continue                     # 连音线的第二个音头(段内/跨段都并)
-            cnt += 1
-            tie, prev_key, last_note = False, key, True
+            for _d, _ac, _o in ns:           # 和弦 token 逐音算(与前端 parseTokenAll 同口径)
+                if _d is None:
+                    tie, prev_key, last_note = False, None, False
+                    continue
+                key = (_d, _ac)
+                if tie and prev_key == key:
+                    tie, last_note = False, True
+                    continue                 # 连音线的第二个音头(段内/跨段都并)
+                cnt += 1
+                tie, prev_key, last_note = False, key, True
         if cnt:
             out.append("%d:%s" % (off, name))
             off += cnt
@@ -85,6 +86,22 @@ def parse(t):
     a = 1 if (acc in ("#", "♯") or acc2 in ("#", "♯")) else (-1 if (acc in ("b", "♭") or acc2 in ("b", "♭")) else 0)
     off = (octs + post).count(",") - (octs + post).count("'")
     return (None, a, off) if dig in "0x" else (int(dig), a, off)
+
+
+def parse_all(t):
+    """一个 token -> **每个音**的列表; 不是 token 返回 []。
+
+    ⚠ 2026-10-05 必须用这个, 不能再用 `d, ac, _o = parse(t)`: jptok 学会认**和弦 token**之后
+    (一个 token 里连写多个音，实测 223 首、646,710 个音原先进不了索引), 和弦时
+    `jptok.parse_token` 返回的是**列表** -> 那行解包会 ValueError, 整条索引重建直接炸。
+    口径与 Python 侧 jptok.parse_token_all 一致: 单音仍是 1 项。兜底正则只认单音。
+    """
+    if jptok and hasattr(jptok, "parse_token_all"):
+        return jptok.parse_token_all(t)
+    got = parse(t)
+    if got is None:
+        return []
+    return got if isinstance(got, list) else [got]
 
 
 def group_of(t):
@@ -220,25 +237,28 @@ def main():
         score = r.get("score") or ""
         # ⚠ `~` 不是音符(parse 返回 None), 但**必须留下** —— 它是连音线记号, 下一轮要靠它判"两个音头并一个"
         #   (2026-09-28: 以前这里直接滤掉, 于是站点索引里的音符数比语料多出 14455 个连音线音头)
-        toks = [t for t in score.split() if parse(t) or t == "~"]
+        # ⚠ 2026-10-05: 判"是不是 token"要用 parse_all —— 和弦 token 在 parse 那边返回列表(真值),
+        #   但**空列表也要当非 token**, 用 `parse(t)` 会出现"[] 是假 -> 被当非 token"的巧合式正确;
+        #   显式用 parse_all 更长, 但不必依赖真值语义。
+        toks = [t for t in score.split() if parse_all(t) or t == "~"]
         p, acc, oct_ = [], [], []
         tie, prev_key, last_note = False, None, False   # 连音线 `X ~ X` 只算一个音(2026-09-28 口径)
         for t in toks:
             if t == "~":
                 tie = last_note
                 continue
-            d, ac, off = parse(t)
-            if d is None:                     # 休止/念白: 不进音高, 但仍在 s 里显示
-                tie, prev_key, last_note = False, None, False
-                continue
-            key = (d, ac)
-            if tie and prev_key == key:
-                tie, last_note = False, True
-                continue                      # 连音线的第二个音头
-            p.append(str(d))
-            acc.append("1" if ac == 1 else "2" if ac == -1 else "0")
-            oct_.append(str(off))
-            tie, prev_key, last_note = False, key, True
+            for d, ac, off in parse_all(t):   # 和弦 token: 逐音进索引(与前端 parseTokenAll 同口径)
+                if d is None:                 # 休止/念白: 不进音高, 但仍在 s 里显示
+                    tie, prev_key, last_note = False, None, False
+                    continue
+                key = (d, ac)
+                if tie and prev_key == key:
+                    tie, last_note = False, True
+                    continue                  # 连音线的第二个音头
+                p.append(str(d))
+                acc.append("1" if ac == 1 else "2" if ac == -1 else "0")
+                oct_.append(str(off))
+                tie, prev_key, last_note = False, key, True
         if not p:
             continue
         src = r.get("source") or ""

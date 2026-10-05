@@ -77,7 +77,7 @@ console.log('status 文本:', (mkEl('status').textContent || '(空)').slice(0, 8
 
 // 触发一次查询(直接调 run 不可达, 改为手动走一遍同一路径)
 const { buildIndex, search } = await importStatic('search');
-const { parseQuery, parseToken, isPitch } = await importStatic('jptok');
+const { parseQuery, parseTokenAll, isPitch } = await importStatic('jptok');
 const app = await importStatic('app');
 const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
 const q = parseQuery(QUERY);
@@ -100,12 +100,28 @@ if (m) {
   const marked = m[1].replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean);
   const pitches = marked.filter(isPitch);
   ok(pitches.length === q.length, `标黑 token ${marked.length} 个, 其中有音高 ${pitches.length} 个 (期望 ${q.length})`);
-  const bad = marked.filter((t) => parseToken(t) && !isPitch(t));
+  const bad = marked.filter((t) => parseTokenAll(t).length > 0 && !isPitch(t));
   ok(bad.length === 0, `标黑段里没有休止/念白 (发现: ${bad.join(' ') || '无'})`);
-  const got = pitches.map((t) => parseToken(t).d).join('');
+  // ⚠ 2026-10-05: 用 parseTokenAll **逐音**核对, 不能写 `parseToken(t).d` —— 和弦 token 一个顶
+  //   好几个音(parseToken 返回数组, 没有 .d)。而且和弦展开后"标黑的新音数"可能多于查询音数
+  //   (查询的最后一个音正好落在和弦里), 所以只核**前 q.length 个新音**: 逐 token 往下取新音,
+  //   取够就停, 再看这一段是不是正好等于查询。
+  const got = [];
+  for (const t of marked) {
+    for (const p of parseTokenAll(t)) {
+      if (p.d === '0' || p.d === 'x') continue;
+      got.push(p.d);
+      if (got.length >= q.length) break;
+    }
+    if (got.length >= q.length) break;
+  }
+  const gotStr = got.slice(0, q.length).join('');
   const want = q.map((x) => x.d).join('');
-  ok(got === want, `标黑的音 = 查询  (${got} vs ${want})`);
+  ok(gotStr === want, `标黑的音 = 查询  (${gotStr} vs ${want})`);
   console.log('  标黑段:', pitches.join(' '));
+  if (got.length > q.length) {
+    console.log(`  注: 标黑段里还有 ${got.length - q.length} 个新音(查询末尾落在和弦 token 里)`);
+  }
 }
 // 第一条小节线落在第几个音符之前 —— 必须与数据一致
 const firstBarTok = (r.raw || '').split(' ');

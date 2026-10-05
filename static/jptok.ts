@@ -1,7 +1,9 @@
 /* 简谱 token 解析 —— 唯一实现(与 Python 侧 skills/jianpu-melody-lookup/jptok.py 同口径)
  *
  * token 形态:  [时值 cqsdh]* [,']* [#b♯♭]? [1-7x0] [,']* [#b♯♭]? [时值 cqsdh]* [.]* \]?
- * 变音: # ♯ = +1, b ♭ = -1, 无 = 0        八度: , = -1, ' = +1
+ * **和弦 token**: 多个音**连写成一个**(见下面的第四次事故记录):
+ *              [时值 cqsdh]* ( [,']* [#b♯♭]? [1-7x0] ){2,} [,']* [#b♯♭]? [时值 cqsdh]* [.]* \]?
+ * 变音: # ♯ = +1, b ♭ = -1, 无 = 0        八度: , = -1, ' = +1(逐字累加, 与 Python 侧逐字一致)
  * 休止 0 / 念白 x: 不算音高(但仍是 token)
  *
  * 为什么要单独一个文件: 同一套白名单以前散在多处, 升降号口径各不相同 ——
@@ -12,12 +14,31 @@
  * ⚠ 2026-09-28: 末尾**只能**有 `]`, **不能**有 `[` —— jianpu-ly 的三连音写作 `3[ 5 3 4 ]`,
  *   那个 `3[` 的 3 是连音数、`[`/`]` 是分组记号, **都不是音符**。原来允许 `[` 结尾, 于是
  *   `parseToken('3[')` 返回一个音, `3[ 5 3 4 ]` 被算成 **4 个音**。改这里时**必须同时改 Python 侧**。
+ * ⚠ 2026-10-05 第四次(**和弦 token 被整批丢掉**): 语料里 223 首用和弦写法 —— 多个音连写成
+ *   一个 token, 八度/变音写在**各自音级左边**(抄参考实现 vendor/jianpu_ly/__init__.py:1860
+ *   `chordNotes_markup()` 调 :1802 `grace_octave_fix()`: 把写在数字右边的记号搬到左边)。
+ *   实测全库 11,876 份里和弦 token 261,647 个、写明 646,747 个音(有音高 646,710 个)。
+ *   原来 `TOKEN` 一个都匹配不上 -> 这 646,710 个音**从没进过检索索引**。
+ *   修法与 Python 侧**逐字对齐**: 新增 `parseTokenAll()`(逐音), 单音 token **先**走原来那条
+ *   TOKEN 正则、命中就直接返回 —— 于是单音输出**逐字节不可能变**; `parseToken()` 保持不变,
+ *   只是遇到和弦 token 会返回**数组**(⚠ 调用方若写 `parseToken(t).d` 遇到和弦会 `undefined`)。
+ *   验证: `tools/check_jptok_js.mjs`(逐 token 逐音比对 Python 侧的 token 表)必须通过。
  *
  * 2026-10-01 TypeScript 化（B 阶段）: 只加类型, **一个字的行为都没改** —— 转换后
  * `check_jptok_js.mjs`（21,711 token 逐项比对）与 `check_search.mjs` 必须照样通过。
  */
 const TOKEN =
   /^([cqsdh]*)([,']*)([#b♯♭]?)([1-7x0])([,']*)([#b♯♭]?)([cqsdh]*)(\.*)(\]?)$/;
+
+/** 和弦 token(**只在 TOKEN 匹配不上时才试它**, 与 Python 侧 jptok.CHORD 逐字同口径):
+ *  时值字母在最前, 之后**连写**若干"八度/变音 + 音级", 附点在最末。
+ *  `{2,}` 是硬性的: 只有一个音级的写法归上面那条 TOKEN 管 —— 这样"和弦分支"永远不会
+ *  改变单音 token 的判定(这就是本次改动的兼容性保证)。
+ *  末尾游离的八度/变音归**最后一个**音(与 TOKEN 里 acc2/oct2 归同一个音是同一套处理)。 */
+const CHORD =
+  /^([cqsdh]*)((?:[,']*[#b♯♭]?[1-7x0]){2,})([,']*)([#b♯♭]?)([cqsdh]*)(\.*)(\]?)$/;
+/** 和弦体里切出每一个音: 八度记号 + 变音 + 音级 */
+const NOTE = /([,']*)([#b♯♭]?)([1-7x0])/g;
 
 /** 一个 token 的解析结果：音级（`1`-`7`，休止 `0`/念白 `x`）、变音、八度偏移。 */
 export interface JpToken {
@@ -26,6 +47,9 @@ export interface JpToken {
   oct: number;
 }
 
+/** `parseToken()` 遇到和弦 token 时返回的**逐音**结果：数组长度 >= 2。 */
+export type JpTokenList = JpToken[];
+
 /** 用户输入解析出的音符（只有 1-7，带变音与八度）。 */
 export interface Note {
   d: number;
@@ -33,26 +57,64 @@ export interface Note {
   oct: number;
 }
 
-/** token -> {d, acc, oct} 或 null（不是合法 token） */
-export function parseToken(t: string | null | undefined): JpToken | null {
-  const m = TOKEN.exec(t == null ? '' : String(t));
-  if (!m) return null;
-  const octs = m[2] ?? '';
-  const acc = m[3] ?? '';
-  const dig = m[4] ?? '';
-  const post = m[5] ?? '';
-  const acc2 = m[6] ?? '';
-  const a =
-    acc === '#' || acc === '♯' || acc2 === '#' || acc2 === '♯'
-      ? 1
-      : acc === 'b' || acc === '♭' || acc2 === 'b' || acc2 === '♭'
-        ? -1
-        : 0;
-  const off =
-    (octs + post).split(',').length -
-    1 -
-    ((octs + post).split("'").length - 1);
-  return { d: dig, acc: a, oct: off };
+/** 多个变音记号 -> +1/-1/0（升号优先, 与 Python 侧 `_acc_join` 逐字一致）。 */
+function accJoin(...marks: (string | undefined)[]): number {
+  const s = marks.filter(Boolean).join('');
+  return /[#♯]/.test(s) ? 1 : /[b♭]/.test(s) ? -1 : 0;
+}
+
+/** 多个八度记号 -> 偏移（逗号 -1、撇 +1, 逐字累加; 与 Python 侧 `_oct_join` 逐字一致）。 */
+function octJoin(...marks: (string | undefined)[]): number {
+  const s = marks.filter(Boolean).join('');
+  return (s.match(/,/g) ?? []).length - (s.match(/'/g) ?? []).length;
+}
+
+/** 一个音级 + 它的记号 -> {d, acc, oct}（`0`/`x` 的 d 原样保留, 与 Python 侧一致）。 */
+function sound(dig: string, accs: string, octs: string, acc2 = '', oct2 = ''): JpToken {
+  return { d: dig, acc: accJoin(accs, acc2), oct: octJoin(octs, oct2) };
+}
+
+/** token -> **它包含的每一个音**；不是合法 token 返回 `[]`。
+ *
+ *  单音 token 返回 1 项（与旧 `parseToken` 的结果逐字段相同）；**和弦 token** 返回它包含的
+ *  每个音各一项, 顺序照 token 里的书写顺序（不排序）。这是"和弦 token 不再丢音"的落点:
+ *  调用方遍历 token 时应当用它, 而不是只取第一项。口径与 Python 侧 `jptok.parse_token_all` 相同。
+ */
+export function parseTokenAll(t: string | null | undefined): JpTokenList {
+  const s = t == null ? '' : String(t);
+  const m = TOKEN.exec(s);
+  if (m) {
+    // 单音 token 走原路: 命中就直接返回, 输出不可能变
+    return [sound(m[4] ?? '', m[3] ?? '', m[2] ?? '', m[6] ?? '', m[5] ?? '')];
+  }
+  const c = CHORD.exec(s);
+  if (!c) return [];
+  const body = c[2] ?? '';
+  const oct2 = c[3] ?? '';
+  const acc2 = c[4] ?? '';
+  const parts: JpToken[] = [];
+  // ⚠ 正则带 g 标志 -> 每次用之前把 lastIndex 归零, 否则第二次调用会从上次的位置接着扫。
+  NOTE.lastIndex = 0;
+  let mm: RegExpExecArray | null;
+  const raw: [string, string, string][] = [];
+  while ((mm = NOTE.exec(body)) !== null) raw.push([mm[1] ?? '', mm[2] ?? '', mm[3] ?? '']);
+  for (let i = 0; i < raw.length; i++) {
+    const [octs, acc, dig] = raw[i]!;
+    const last = i === raw.length - 1;
+    parts.push(sound(dig, acc, octs, last ? acc2 : '', last ? oct2 : ''));
+  }
+  return parts;
+}
+
+/** token -> {d, acc, oct}（**单音**）| 数组（**和弦**, >= 2 项）| null（不是合法 token）。
+ *
+ *  ⚠ 和弦分支返回的是**数组**: 老代码若写 `parseToken(t).d` 遇到和弦会得到 `undefined`
+ *  —— 这是故意的, 免得又出现"整批丢音还没人发现"。要覆盖和弦请用 `parseTokenAll()`。
+ */
+export function parseToken(t: string | null | undefined): JpToken | JpTokenList | null {
+  const got = parseTokenAll(t);
+  if (got.length === 0) return null;
+  return got.length === 1 ? got[0]! : got;
 }
 
 /** 一个 token 占几拍（与 Python 侧 `jptok.beat` 同口径：时值字母前后都认）。 */
@@ -76,10 +138,10 @@ export function beat(t: string | null | undefined): number {
  * 索引里的音符序号（`at` / `bars` / `n`）只数这些 —— 休止与念白**不进**音高串。
  * 前端要按"第几个音符"定位时**必须**用它，用 `parseToken` 会把休止也算进去，
  * 于是高亮和 `|` 整体前移（实测：`th10_06` 开头 `c0 q0` 被误标黑，用户一眼看出）。
+ * 和弦 token 里只要有**一个**有音高的音就算真（与 Python 侧 `jptok.is_pitch` 同口径）。
  */
 export function isPitch(t: string | null | undefined): boolean {
-  const p = parseToken(t);
-  return !!p && p.d !== '0' && p.d !== 'x';
+  return parseTokenAll(t).some((p) => p.d !== '0' && p.d !== 'x');
 }
 
 /** 整段用户输入 -> `[{d,acc,oct}]`，只保留 1-7。

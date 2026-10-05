@@ -207,6 +207,7 @@ async def gate(request: Request, call_next):
     """
     path = request.url.path
     api = path.startswith("/api/")
+    ws2 = path == "/ws/2" or path.startswith("/ws/2/")     # MusicBrainz 风格那份也要带 CORS
     tmpl = _path_template(path)
     t0 = time.perf_counter()
     # ⚠ 闸门**只管 POST /api/submit** —— 旧版的 `do_GET` 里 `/api/health` 是**敞开的**（不带口令也能查）。
@@ -228,7 +229,7 @@ async def gate(request: Request, call_next):
     REQ_TOTAL.labels(request.method, tmpl, str(resp.status_code)).inc()
     REQ_SECONDS.labels(request.method, tmpl).observe(time.perf_counter() - t0)
     # ③ CORS: 只加在 JSON 响应上（旧版写在 `_json()` 里；它对"未知 /api 路径"发的是裸 404，没有这个头）
-    if api and "json" in (resp.headers.get("content-type") or "").lower():
+    if (api or ws2) and "json" in (resp.headers.get("content-type") or "").lower():
         resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
 
@@ -306,6 +307,21 @@ async def preflight(rest: str) -> Response:
     为什么不用 CORSMiddleware 的默认行为: 它对 `OPTIONS /api/submit` 会返回 405/200 且头不同
     —— 对拍实测到 `旧=204 新=405`。浏览器预检要的是 204 + 允许的方法/头，这里照旧版写死。
     """
+    return _preflight_response()
+
+
+@app.options("/ws/2/{rest:path}", include_in_schema=False)
+async def preflight_ws2(rest: str) -> Response:
+    """`/ws/2/*` 的 CORS 预检：**同一份 204 应答**。
+
+    标准库版 `app/server.py` 的 `do_OPTIONS` 是**不看路径**的（任何路径都回这套头），
+    所以这里也照那个行为给 `/ws/2/*` 一份 —— 否则浏览器里的跨域调用会"两个后端一个能预检一个不能"。
+    """
+    return _preflight_response()
+
+
+def _preflight_response() -> Response:
+    """预检应答（204 + 三个头 + Content-Length: 0）—— `/api/*` 与 `/ws/2/*` 共用同一份。"""
     return Response(status_code=204, headers={
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type,X-Token",
@@ -334,6 +350,25 @@ async def search_endpoint(request: Request) -> JSONResponse:
     """
     code, out, headers = search_api.handle(request.url.query,
                                            request.client.host if request.client else "")
+    return JSONResponse(status_code=code, content=out, headers=headers)
+
+
+@app.get("/ws/2/{rest:path}", summary="MusicBrainz 风格只读 Web Service（/ws/2/）")
+async def ws2(rest: str, request: Request) -> JSONResponse:
+    """`/ws/2/`（API 根）、`/ws/2/song?query=…`（检索）、`/ws/2/song/<id>`（单条实体）。
+
+    口径**只有一份**：`app/search_api.py` 的 `ws2_handle`（标准库版 `app/server.py` 调的是同一个
+    函数），所以两边的信封、错误体、限流与文案不会走偏。与 `/api/*` 的三处**有意不同**（照
+    MusicBrainz 的习惯）：限流是每 IP 每秒 1 次（503 + `Retry-After: 1`）、错误体是 `{"error": …}`、
+    检索回 `{created, count, offset, songs[]}` 信封。
+
+    `{rest:path}` 也能吃下**空串**，所以 `/ws/2` 与 `/ws/2/` 两条都到这儿（不用再挂一条重复路由）。
+    """
+    code, out, headers = search_api.ws2_handle(
+        request.url.path, request.url.query,
+        request.client.host if request.client else "",
+        request.headers.get("accept") or "",
+        search_api.base_url_from_host(request.headers.get("host") or ""))
     return JSONResponse(status_code=code, content=out, headers=headers)
 
 

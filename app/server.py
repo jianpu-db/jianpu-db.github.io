@@ -12,6 +12,10 @@
   GET  /api/health   -> {ok, repo, feedback_count}
   GET  /api/search?q=<旋律>&fuzzy=0&top=20  -> 只读检索(按旋律数字串查歌)
       参数/限流/缓存的口径全在 app/search_api.py(与 FastAPI 版共用同一份)
+  GET  /ws/2/         -> MusicBrainz 风格只读 Web Service 的 API 根(2026-10-05 加)
+  GET  /ws/2/song?query=<旋律>&limit=&offset=&fmt=json   -> 检索(带 {created,count,offset,songs} 信封)
+  GET  /ws/2/song/<id>?fmt=json&inc=artists+tags+links   -> 单条实体(id = source 或文件名主干)
+      这三条的口径同样**只有一份**在 app/search_api.py(ws2_handle);限流是每IP每秒1次、错误体是 {"error": …}
   GET  /s/<id>       -> 单页应用(: 每首谱的独立页面, 前端按 id 渲原图/元数据)
   GET  /img/<路径>   -> 原图(路径相对**工作区根**, 如 images-prep/批次/标题__source/001.jpg)
 
@@ -708,6 +712,16 @@ class H(BaseHTTPRequestHandler):
             code, out, headers = search_api.handle(
                 self.path.split("?", 1)[1] if "?" in self.path else "",
                 self.client_address[0] if self.client_address else "")
+            return self._json(code, out, headers)
+        if path == "/ws/2" or path.startswith("/ws/2/"):
+            # MusicBrainz 风格只读命名空间(2026-10-05): 口径同样**只有一份**在 app/search_api.py,
+            # 这里只搬上 HTTP(FastAPI 版那条路由也走同一个 ws2_handle)。
+            code, out, headers = search_api.ws2_handle(
+                path,
+                self.path.split("?", 1)[1] if "?" in self.path else "",
+                self.client_address[0] if self.client_address else "",
+                self.headers.get("Accept") or "",
+                search_api.base_url_from_host(self.headers.get("Host") or ""))
             return self._json(code, out, headers)
         if path.startswith(IMG_PREFIX):
             full = resolve_img(path[len(IMG_PREFIX):])

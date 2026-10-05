@@ -15,6 +15,7 @@
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,6 +52,16 @@ CASES = [
     ("GET", "/api/search", None, "检索：缺 q -> 400"),
     ("GET", "/api/search?q=12&fuzzy=9", None, "检索：fuzzy 非法 -> 400"),
     ("GET", "/api/search?q=12345&top=0", None, "检索：top=0 被钳到 1"),
+    # MusicBrainz 风格只读命名空间（2026-10-05 加；口径同样只有一份 app/search_api.py）
+    ("GET", "/ws/2/", None, "ws2：API 根"),
+    ("GET", "/ws/2/song?query=316316&limit=5&fmt=json", None, "ws2：检索"),
+    ("GET", "/ws/2/song?query=316316&limit=5&offset=2", None, "ws2：检索翻页"),
+    ("GET", "/ws/2/song/qupu123-268596?fmt=json&inc=artists+tags+links+sections", None, "ws2：单条实体"),
+    ("GET", "/ws/2/song/qupu123-268596?inc=bogus", None, "ws2：未知 inc（忽略 + 提示）"),
+    ("GET", "/ws/2/song/no-such-id-000000", None, "ws2：未知 id -> 404"),
+    ("GET", "/ws/2/song?query=316316&limit=abc", None, "ws2：非法 limit -> 400"),
+    ("GET", "/ws/2/song?query=316316&fmt=xml", None, "ws2：非法 fmt -> 400"),
+    ("GET", "/ws/2/song", None, "ws2：缺 query -> 400"),
 ]
 
 
@@ -81,6 +92,9 @@ def norm_body(status, headers, raw, base="", db=""):
           （如"找不到 linkurl.py —— JIANPU_DB=D:\\…\\ci-iso1 对吗?"）—— CI 里空语料库时**4 条全部误报**，
           正是这一条让我发现"对拍脚本自己也得对环境做归一化"。
       * JSON: 去掉 health 里那两处**有意差异**的字段（server/version）。
+      * `/ws/2/` 的 `created`：那是**响应生成那一刻**的时间，两边各取一次必然差几毫秒 ——
+        测试装置的噪声，不是行为差异（`count_exact` 之类真字段照比）。
+      * 两边跑在不同端口，`/ws/2/` 里那几条示例地址带着各自的 origin：按**两边各自的 base** 归一。
     """
     if base:
         raw = raw.replace(base.rstrip("/").encode(), b"<ORIGIN>")
@@ -97,8 +111,30 @@ def norm_body(status, headers, raw, base="", db=""):
         if isinstance(obj, dict):
             obj.pop("server", None)          # FastAPI 版多这两个标记（告示"我是谁"）
             obj.pop("version", None)
+            _strip_volatile(obj, base)
         return json.dumps(obj, ensure_ascii=False, sort_keys=True)
     return raw.decode("utf-8", "replace")
+
+
+def _strip_volatile(obj, base, _depth=0):
+    """递归去掉"每次响应都不一样、但不代表行为差异"的东西：`created`（响应时刻）与示例地址里的 origin。
+
+    ⚠ **只在字段真的存在时才换成占位值** —— 否则"某一边少了 `created`"这种真差异会被这一步
+       悄悄抹平（对拍最怕的就是"为了少误报而假装没看见"）。
+    """
+    if _depth > 6:
+        return
+    if isinstance(obj, dict):
+        if "created" in obj:
+            obj["created"] = "<CREATED>"
+        for k, v in list(obj.items()):
+            if isinstance(v, str) and base:
+                obj[k] = v.replace(base.rstrip("/"), "<ORIGIN>")
+            else:
+                _strip_volatile(v, base, _depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            _strip_volatile(v, base, _depth + 1)
 
 
 def main():
@@ -126,6 +162,10 @@ def main():
     print(f"对拍: 旧 {a.old}  vs  新 {a.new}" + (f"  (X-Token={'有' if a.token else '无'})"))
     for method, path, body, note in CASES:
         s1, h1, b1 = call(a.old, method, path, body, a.token)
+        # ⚠ `/ws/2/*` 的限流是**每 IP 每秒 1 次**（照 MusicBrainz），两边各自计数 ——
+        #   不隔开的话第 2 条起就变成"旧 503 vs 新 503"，看起来一致，其实什么都没测到。
+        if path.startswith("/ws/2"):
+            time.sleep(1.05)
         s2, h2, b2 = call(a.new, method, path, body, a.token)
         n1 = norm_body(s1, h1, b1, a.old, db_old)
         n2 = norm_body(s2, h2, b2, a.new, db_new)

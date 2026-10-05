@@ -144,5 +144,77 @@ console.log('\n⑤ /api/gh（Star 数走服务端 + 缓存；不碰本机后端�
   globalThis.fetch = realFetch;   // 还原，别把后面/别的检查搞坏
 }
 
+// ⑥ `/ws/2/*`（MusicBrainz 风格只读接口，2026-10-05 加）在边缘的三件事:
+//    ① 路由到**和 /api/* 同一个上游**（API_UPSTREAM）而不是掉进 SPA 兜底或 404；
+//    ② 成功响应带短缓存（`max-age=60`）；
+//    ③ **带 Retry-After 的 503 绝不能被缓存**（否则一次限流会被边缘记住，60 秒内所有调用方一起挨 503）。
+//    同样靠替换全局 fetch 来断言"转给了谁、回来的头被怎么改"，不打真隧道。
+console.log('\n⑥ /ws/2/*：反代到 API_UPSTREAM + 缓存纪律');
+{
+  const realFetch = globalThis.fetch;
+  const envUp = { ASSETS: fakeAssets, API_UPSTREAM: 'https://up.example', API_TOKEN: 'tok-123' };
+  let seen = [];
+  const stub = (impl) => {
+    globalThis.fetch = async (u, opt) => { seen.push({ url: String(u), headers: opt?.headers }); return impl(u, opt); };
+  };
+  const hdr = (h, k) => (h && (h.get ? h.get(k) : h[k])) || '';
+
+  // (a) 成功 -> 200 + 短缓存，并且确实转到了同一个上游（路径与查询串原样保留）
+  seen = [];
+  stub(async () => new Response('{"created":"x","count":1,"offset":0,"songs":[]}',
+    { status: 200, headers: { 'content-type': 'application/json' } }));
+  let r = await worker.fetch(new Request('https://jianpu-db.org/ws/2/song?query=316316&limit=5'), envUp);
+  await r.text();
+  check(r.status === 200 && /max-age=60/.test(r.headers.get('cache-control') || ''),
+        `/ws/2/song 成功带上短缓存 -> ${r.headers.get('cache-control')}`);
+  check(seen.length === 1 && seen[0].url === 'https://up.example/ws/2/song?query=316316&limit=5',
+        `反代到同一个 API_UPSTREAM -> ${seen[0] && seen[0].url}`);
+  check(hdr(seen[0] && seen[0].headers, 'X-Token') === 'tok-123',
+        `带上 X-Token（本机写后端要它）`);
+
+  // (b) `/ws/2/`（API 根）也走这条，不是 404、也不是 index.html
+  seen = [];
+  stub(async () => new Response('{"name":"jianpu-db Web Service"}',
+    { status: 200, headers: { 'content-type': 'application/json' } }));
+  r = await worker.fetch(new Request('https://jianpu-db.org/ws/2/'), envUp);
+  const bodyB = await r.text();
+  check(r.status === 200 && bodyB.includes('Web Service') && seen[0].url === 'https://up.example/ws/2/',
+        `/ws/2/ 也是反代（不是 SPA 兜底）-> ${r.status} ${seen[0] && seen[0].url}`);
+
+  // (c) 限流的 503（带 Retry-After）-> no-store，绝不缓存
+  seen = [];
+  stub(async () => new Response('{"error":"请求太快"}',
+    { status: 503, headers: { 'content-type': 'application/json', 'retry-after': '1' } }));
+  r = await worker.fetch(new Request('https://jianpu-db.org/ws/2/song?query=1'), envUp);
+  const bodyC = await r.text();
+  check(r.status === 503 && /no-store/.test(r.headers.get('cache-control') || '') &&
+        r.headers.get('retry-after') === '1' && bodyC.includes('请求太快'),
+        `503+Retry-After 是 no-store（不会被边缘记住）-> ${r.headers.get('cache-control')}`);
+
+  // (d) 404 之类也不给成功那套缓存
+  seen = [];
+  stub(async () => new Response('{"error":"没有这一首"}',
+    { status: 404, headers: { 'content-type': 'application/json' } }));
+  r = await worker.fetch(new Request('https://jianpu-db.org/ws/2/song/nope'), envUp);
+  await r.text();
+  check(r.status === 404 && !/max-age=60/.test(r.headers.get('cache-control') || ''),
+        `404 不被当成可缓存的成功 -> ${r.status} ${r.headers.get('cache-control') || '(无)'}`);
+
+  // (e) OPTIONS 预检：204，不要在没连上游时就挂
+  seen = [];
+  const r5 = await worker.fetch(new Request('https://jianpu-db.org/ws/2/song', { method: 'OPTIONS' }), envUp);
+  check(r5.status === 204 && (r5.headers.get('access-control-allow-origin') === '*') && seen.length === 0,
+        `/ws/2/* 的 OPTIONS 预检 -> ${r5.status}（没打上游）`);
+
+  // (f) 没配 API_UPSTREAM 时给出人话 503，而不是 404/HTML
+  seen = [];
+  const r6 = await worker.fetch(new Request('https://jianpu-db.org/ws/2/'), env);
+  const d6 = await r6.json();
+  check(r6.status === 503 && d6.ok === false && /后端/.test(String(d6.err)),
+        `没配上游时 503 + 人话 -> ${r6.status} ${JSON.stringify(d6).slice(0, 60)}`);
+
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${fail === 0 ? '通过' : '失败 ' + fail + ' 项'}（共 ${pass + fail} 项）`);
 process.exit(fail ? 1 : 0);

@@ -33,6 +33,9 @@ run node tools/check_worker_routes.mjs
 # 只读检索 API（GET /api/search）：脚本**自起一份 app/server.py**（自挑空闲端口、跑完收干净），
 # 所以它同样不吃 $URL，也不会被本机 8770 是不是活着牵连；旁边没有语料/工具仓库时它自己跳过。
 run node tools/check_search_api.mjs
+# MusicBrainz 风格只读 Web Service（/ws/2/*）：同样自起一份 app/server.py，不吃 $URL。
+# ⚠ 它的限流是**每IP每秒1次**，所以脚本内部要真等（约 40 秒）—— 这是被测对象的性质，不是脚本慢。
+run node tools/check_ws2_api.mjs
 # 归组重复是**报告**不是门槛（它报的是"用户可见的重复"，那是产品决策不是 bug），所以只打印:
 echo; echo "=== 归组重复报告（非门槛）==="
 node tools/check_dup_groups.mjs 2>&1 | tail -n 6

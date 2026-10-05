@@ -118,6 +118,37 @@ curl -s -X POST https://jianpu-db.org/api/submit -H 'Content-Type: application/j
 
 顺便记一条实测：同一份索引从**边缘**（本域名）下载 **3.1 s**，从 GitHub Pages 镜像 **18.9 s**（6 倍）。
 
+## 一·补四、MusicBrainz 风格 `/ws/2/*` 上线（2026-10-05）
+
+边缘这一侧只做三件事：**路由到和 `/api/*` 同一个 `API_UPSTREAM`**、`OPTIONS` 预检、
+给成功的 `GET` 加短缓存。口径（信封、`inc`、限流、错误体）全在本机那份 `app/search_api.py`。
+
+* `/ws/2`、`/ws/2/…` 与 `/api/*` 走**同一个上游**：它们本来就是同一台本机服务的两个命名空间，
+  分开放两个上游只会多一份"谁指向哪儿"的心智负担。
+* 缓存：成功的 `GET` 补 `Cache-Control: public, max-age=60`；**带 `Retry-After` 的 503 一律
+  `no-store`** —— 限流是**每 IP 每秒 1 次**，若被边缘缓存 60 秒，一次限流会让所有调用方一起挨 503。
+* 自检：`node tools/check_worker_routes.mjs`（第 ⑥ 组 8 项：反代目标、`X-Token`、短缓存、
+  503 不缓存、OPTIONS、没配上游时的人话 503）。
+
+**绕开 `dist` 目录锁**（2026-10-05 实测）：`wrangler deploy` 会报
+`EPERM: Permission denied …\dist`，`rm -rf dist` 也删不掉。查下来是**上一次 `wrangler dev`
+留下的 `workerd.exe` + `esbuild.exe` 还挂在 `dist` 上**（它们的 PID 在 `npm`/`wrangler dev`
+的进程树下）。处置（不需要改配置）：
+
+```powershell
+# 1) 找到占用的 workerd/esbuild，看父进程是不是上一次的 wrangler dev
+Get-CimInstance Win32_Process -Filter "Name='workerd.exe' or Name='esbuild.exe'" |
+  Select-Object ProcessId,ParentProcessId,CommandLine
+# 2) 杀掉那个父进程（连同子进程）；**别乱杀其它 node**（编辑器/DSH 自己也是 node）
+Stop-Process -Id <wrangler-dev的node-pid> -Force
+# 3) 确认能改名/删除 -> 说明锁没了
+Rename-Item dist dist-locked-old      # 成功即锁已释放
+```
+
+真需要"换目录部署"时（例如锁始终清不掉）：`node tools/build_dist.mjs --out dist-cf`
+再把 `wrangler.jsonc` 的 `assets.directory` 指到 `./dist-cf`。**动配置前先备份**，
+因为 GitHub 那条流水线跑的仍是默认的 `dist/`，两边不一致会让"本机部署"和"CI 部署"产物不同步。
+
 ## 二、（可选）原图与投稿后端
 
 * **原图走 R2**（否则 Worker 会去 `IMG_UPSTREAM` 反代，走你家上行）：

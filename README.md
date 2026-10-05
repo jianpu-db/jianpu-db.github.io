@@ -77,6 +77,52 @@ node tools/bench_search.mjs 40      # 量索引构建与查询延迟
 
 写路径与语料在另外两个仓库：语料 `Francium-223/jianpu-db`、流水线工具 `jianpu2`。
 
+## 只读 Web Service（MusicBrainz 风格，`/ws/2/`）
+
+2026-10-05 加。形状照 [MusicBrainz 的 `/ws/2/`](https://musicbrainz.org/doc/MusicBrainz_API)：
+实体 + `inc=` + `fmt=` + `limit/offset` + `{"created","count","offset",…}` 信封 + 每 IP 每秒 1 次
++ 建议带 User-Agent。第三方工具照着这个形状接，几乎不用读文档。
+
+**只有 `song` 一个实体**，主键就是语料里的 `source`（如 `qupu123-268596`），
+也接受 `scores/` 里的文件名主干（如 `水手`）。
+
+| 端点 | 说明 |
+|---|---|
+| `GET /ws/2/` | API 根：实体、参数、限流、一条可点的示例地址 |
+| `GET /ws/2/song/<id>?fmt=json&inc=…` | 单条实体（**直接返回对象，不套信封**） |
+| `GET /ws/2/song?query=<旋律>&limit=&offset=&fmt=json` | 检索（内部调现成的 matcher） |
+
+```bash
+# API 根
+curl -s https://jianpu-db.org/ws/2/ | head -c 300
+
+# 检索：旋律 316316 的前 5 条（query 也可以用 q=）
+curl -s 'https://jianpu-db.org/ws/2/song?query=316316&limit=5&fmt=json'
+
+# 单条实体（id 用 source，也可以用文件名主干）
+curl -s 'https://jianpu-db.org/ws/2/song/qupu123-268596?fmt=json&inc=artists+tags+links+sections'
+```
+
+* **参数**：`query`（旋律数字串，1-7）、`limit`（默认 25，上限 100，超了钳到 100）、
+  `offset`（默认 0）、`fmt`（只支持 `json`；不传就是 json，也接受 `Accept: application/json`）、
+  `inc`（`artists`、`tags`、`links`、`sections`、`score`，多选用 `+` 或空格；
+  **不认识的值忽略**，并在响应头 `X-Unknown-Inc` 里列出来，不会 500）。
+* **限流**：**每 IP 每秒 1 次**（照 MusicBrainz 的习惯）。超出回 `503` + `Retry-After: 1`。
+  请带上能识别调用方的 `User-Agent`，例如 `jianpu-db/ws2 (+https://jianpu-db.org/ws/2/)`。
+* **错误**：一律 `{"error": "…"}`（`400` / `404` / `503`）。
+* **信封**：检索回 `{"created": <ISO 时间>, "count": <命中数>, "offset": <偏移>, "songs": [...]}`，
+  每条 `song` 里多一个 `match`（代价 `diff`、位置 `pos`、段落等）。
+  `count` 是"这次看到多少条"：常见查询下就是精确总命中数（另给 `count_exact: true`）；
+  宽查询（全库上千首命中）时给 `count_exact: false`，表示服务只数到窗口那么大 ——
+  这样不必为了一个数字把全库物化一遍。
+* **边缘缓存**：`jianpu-db.org` 上成功的 `GET` 带 `Cache-Control: public, max-age=60`；
+  带 `Retry-After` 的 `503` 一律 `no-store`（一次限流不会被边缘记住）。
+* 与 `/api/*` **有意不同**的三处（照 MB，不是笔误）：限流 503 而不是 429、错误体是 `{"error": …}`
+  而不是 `{"ok": false, "err": …}`、检索带信封。`/api/search` 与写端点一个字都没改。
+* 口径只有一份：`app/search_api.py` 的 `ws2_handle`，标准库版 `app/server.py` 与 FastAPI 版
+  `app/api.py` 都调它；自检 `node tools/check_ws2_api.mjs`、跨后端对拍
+  `py -3.13 tools/check_parity_legacy_vs_fastapi.py --old … --new …`。
+
 ## 许可与出处
 
 曲谱的**页面地址与元数据**来自 qupu123 / jianpu.cn / jianpujia 三个公开站点；

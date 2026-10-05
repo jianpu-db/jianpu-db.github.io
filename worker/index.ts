@@ -6,6 +6,10 @@
  *                              R2 里没有 / 没绑桶时, 如果配了 IMG_UPSTREAM, 就**反代回本机**取
  *                              —— 于是"不想开 R2 / 桶还没建"也能先把站点跑起来（代价: 原图走家里上行）
  *   /api/*                    → **反向代理**到本机的 app/server.py（要配 API_UPSTREAM）
+ *   /ws/2/*                   → 同一个上游（2026-10-05 加）: MusicBrainz 风格的只读 Web Service
+ *                               （`/ws/2/` 根、`/ws/2/song?query=…` 检索、`/ws/2/song/<id>` 单条）。
+ *                               口径全在本机那份 app/search_api.py；这里只转发 + 给成功的 GET 加短缓存，
+ *                               并且**带 Retry-After 的 503 绝不缓存**（限流不能被边缘记住）。
  *   其它（/、/static/*、/data/*、/s/<id>）
  *                             → env.ASSETS（构建产物 dist/）; 找不到的路径由
  *                               not_found_handling="single-page-application" 兜回 index.html,
@@ -203,9 +207,10 @@ export default {
     if (path.startsWith(IMG_PREFIX)) {
       return serveImage(request, env, url);
     }
-    if (path.startsWith('/api/')) {
+    if (path.startsWith('/api/') || path === '/ws/2' || path.startsWith('/ws/2/')) {
       // 跨域调用(GitHub Pages 那个静态镜像把投稿指向这里)会先发 OPTIONS 预检:
       // `Content-Type: application/json` 属于非简单请求, 没有这一段浏览器直接就拦了 —— 连不上本机。
+      // `/ws/2/*`（MusicBrainz 风格只读接口, 2026-10-05 加）走同一条预检与同一个上游。
       if (request.method === 'OPTIONS') return preflight();
       if (path === '/api/health') {
         // `og` = 「每谱一页」那份分享卡索引（`data/og.json`）的条数。加它是因为 2026-09-30 上线时
@@ -311,18 +316,28 @@ async function serveImage(request: Request, env: Env, url: URL): Promise<Respons
   return new Response(request.method === 'HEAD' ? null : obj.body, { headers: h });
 }
 
-/** /api/* → 本机服务。带上 X-Token（Worker secret）, 本机设了 JPSUBMIT_TOKEN 就只认它。 */
+/** /api/* 与 /ws/2/* → 本机服务。带上 X-Token（Worker secret）, 本机设了 JPSUBMIT_TOKEN 就只认它。
+ *
+ * 两条前缀走**同一个上游**（`API_UPSTREAM`）：它们本来就是同一台本机服务上的两个命名空间
+ * （`/api/*` 是原来的写+检索，`/ws/2/*` 是 MusicBrainz 风格的只读接口），分开放两个上游只会
+ * 多一份"谁指向哪儿"的心智负担。
+ */
 async function proxyApi(request: Request, env: Env, url: URL): Promise<Response> {
   const upstream = (env.API_UPSTREAM || '').replace(/\/+$/, '');
   if (!upstream) {
     return json({ ok: false, err: '这台部署没有配投稿后端: 投稿要在作者本机的服务上跑' +
                                   '（wrangler secret put API_UPSTREAM / API_TOKEN）' }, 503);
   }
-  return proxyFetch(request, env, upstream + url.pathname + url.search);
+  return proxyFetch(request, env, upstream + url.pathname + url.search,
+                    url.pathname === '/ws/2' || url.pathname.startsWith('/ws/2/'));
 }
 
-/** 把请求原样转给本机服务（/api/* 与"R2 里没有的原图"共用这一条）。 */
-async function proxyFetch(request: Request, env: Env, target: string): Promise<Response> {
+/** 把请求原样转给本机服务（/api/*、/ws/2/* 与"R2 里没有的原图"共用这一条）。
+ *
+ * `ws2Cache` = 这条请求属不属于 `/ws/2/*` 的"只读、可短缓存"那类（见下面的三条纪律）。
+ */
+async function proxyFetch(request: Request, env: Env, target: string,
+                          ws2Cache = false): Promise<Response> {
   const headers = new Headers(request.headers);
   headers.delete('host');
   headers.delete('cf-connecting-ip');
@@ -342,6 +357,19 @@ async function proxyFetch(request: Request, env: Env, target: string): Promise<R
   }
   const out = new Headers(res.headers);
   out.set('Access-Control-Allow-Origin', '*');
+  // `/ws/2/*` 的 GET 成功结果给**短缓存**（60 秒）: 它是只读接口, 同一个查询被反复打（爬虫/机器人）
+  // 时不必每次都穿隧道回本机。三条纪律:
+  //   ① **只在 2xx 上写** —— 400/404/503 的"结论"不该被缓存（尤其 503 是**限流**的答复）；
+  //   ② 带 `Retry-After` 的响应**绝不缓存**（`Cache-Control: no-store`），否则一次限流会被边缘
+  //      记住，整个 60 秒里所有调用方一起挨 503 —— 那才是真事故；
+  //   ③ 上游自己若给了 `Cache-Control`，以它为准（这里只补"没说"的那部分）。
+  if (ws2Cache && (request.method === 'GET' || request.method === 'HEAD')) {
+    if (res.status === 503 || out.has('retry-after')) {
+      out.set('Cache-Control', 'no-store');
+    } else if (res.ok && !out.has('cache-control')) {
+      out.set('Cache-Control', 'public, max-age=60');
+    }
+  }
   return new Response(res.body, { status: res.status, headers: out });
 }
 

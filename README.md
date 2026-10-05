@@ -2,7 +2,7 @@
 
 这是[jianpu-db](https://github.com/Francium-223/jianpu-db)的前端。
 
-[![曲谱](https://img.shields.io/badge/%E6%9B%B2%E8%B0%B1-11%2C381%20%E9%A6%96-0b62c4)](https://jianpu-db.org/) [![音符](https://img.shields.io/badge/%E9%9F%B3%E7%AC%A6-2%2C528%2C904-0b62c4)](https://jianpu-db.org/) [![小节线](https://img.shields.io/badge/%E5%B0%8F%E8%8A%82%E7%BA%BF-551%2C947-0b62c4)](https://jianpu-db.org/) [![出处站](https://img.shields.io/badge/%E5%87%BA%E5%A4%84%E7%AB%99-6%20%E4%B8%AA-0b62c4)](https://jianpu-db.org/) [![索引](https://img.shields.io/badge/%E7%B4%A2%E5%BC%95-4.87%20MB%20gz-177245)](https://jianpu-db.org/) [![查询](https://img.shields.io/badge/%E6%9F%A5%E8%AF%A2-107%20ms-177245)](https://jianpu-db.org/) [![找歌 Top-1](https://img.shields.io/badge/%E6%89%BE%E6%AD%8C%20Top--1-98.9%25-177245)](https://jianpu-db.org/)
+[![曲谱](https://img.shields.io/badge/%E6%9B%B2%E8%B0%B1-11%2C876%20%E9%A6%96-0b62c4)](https://jianpu-db.org/) [![音符](https://img.shields.io/badge/%E9%9F%B3%E7%AC%A6-2%2C599%2C798-0b62c4)](https://jianpu-db.org/) [![小节线](https://img.shields.io/badge/%E5%B0%8F%E8%8A%82%E7%BA%BF-565%2C747-0b62c4)](https://jianpu-db.org/) [![出处站](https://img.shields.io/badge/%E5%87%BA%E5%A4%84%E7%AB%99-7%20%E4%B8%AA-0b62c4)](https://jianpu-db.org/) [![索引](https://img.shields.io/badge/%E7%B4%A2%E5%BC%95-5.25%20MB%20gz-177245)](https://jianpu-db.org/) [![查询](https://img.shields.io/badge/%E6%9F%A5%E8%AF%A2-107%20ms-177245)](https://jianpu-db.org/) [![找歌 Top-1](https://img.shields.io/badge/%E6%89%BE%E6%AD%8C%20Top--1-98.9%25-177245)](https://jianpu-db.org/)
 
 **线上**：https://jianpu-db.org/（正式站，可投稿） · https://jianpu-db.github.io/（只读镜像）
 
@@ -51,7 +51,7 @@ flowchart LR
 ## 这是什么
 
 一份简谱语料，加一个按旋律找歌的检索站。曲谱由视觉语言模型（Qwen3-VL-2B）从扫描件转写而来。
-输入你记得的几个音，比如 `5 5 6 5 3 2 1`，它从全库 11,381 首里按代价排序给出候选。
+输入你记得的几个音，比如 `5 5 6 5 3 2 1`，它从全库 11,876 首里按代价排序给出候选。
 
 部署（域名 / 边缘 / 隧道 / 写后端）见 [DEPLOY.md](DEPLOY.md)。
 

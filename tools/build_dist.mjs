@@ -181,6 +181,9 @@ put(join(ROOT, 'static', 'og.png'), 'static/og.png');
 // 爬虫要的两个根文件（`sitemap.xml` 由 tools/build_web_data.py 随语料一起生成）:
 put(join(ROOT, 'robots.txt'), 'robots.txt');
 put(join(ROOT, 'sitemap.xml'), 'sitemap.xml');
+// AI 客户端的发现入口（2026-10-10 加）: 一句话说明这是什么、接口基址、契约在哪、限流规则。
+// 放在仓库根 = 站点根（与 robots.txt 同一个位置），GitHub Pages 与 Cloudflare 两个目标都会带上它。
+put(join(ROOT, 'llms.txt'), 'llms.txt');
 
 if (TARGET === 'cf') {
   // 缓存策略: 交给 Cloudflare 的 _headers(assets 支持)。数据每次 push 都重新部署,

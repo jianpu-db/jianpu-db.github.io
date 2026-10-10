@@ -704,6 +704,7 @@ def ws2_root(base_url="https://jianpu-db.org"):
     这样返回的那条示例地址**永远点得开**（点开的是一个真查询，不是占位符）。
     """
     ex = f"{base_url.rstrip('/')}{WS2_PREFIX}/song?query=316316&limit=5&fmt=json"
+    origin = base_url.rstrip("/") or "https://jianpu-db.org"
     return {
         "name": WS2_TITLE,
         "version": WS2_VERSION,
@@ -736,6 +737,27 @@ def ws2_root(base_url="https://jianpu-db.org"):
              "note": "单条实体（含歌手/标签/收录页/分段）"},
             {"url": ex, "note": "检索：旋律 316316 的前 5 条"},
         ],
+        # 给人/给 AI 的入口。为什么写在这里：`/ws/2/` 是第三方与 AI **最可能先碰到的那一层**，
+        # 而契约与 llms.txt 挂在服务根上（不在 `/ws/2/` 前缀下），不从这儿链过去就找不着。
+        # ⚠ 说实话：`/openapi.json`、`/docs`、`/llms.txt` 由 **FastAPI 版**的本机服务提供；
+        #   线上 `/ws/2/*` 走 Cloudflare Worker 反代到本机 8770（标准库版），
+        #   那个上游**没有**这三条 —— 所以从线上点这些链接会 404，而 `/ws/2/` 本身可用
+        #   （原话写在仓库根的 `llms.txt` 里，机器关了 `/ws/2/*` 也一起不可用）。
+        "docs": {
+            "openapi": f"{origin}/openapi.json",
+            "swagger": f"{origin}/docs",
+            "redoc": f"{origin}/redoc",
+            "note": "契约由 FastAPI 版自动生成（app/api.py + app/ws2_schema.py）；"
+                    "它挂在本机服务根上，线上是否可达见 llms.txt",
+            "llms": f"{origin}/llms.txt",
+        },
+        "mcp": {
+            "name": "jianpu-db-mcp",
+            "transport": "stdio",
+            "where": "jianpu2 仓库的 _analysis/jianpu-db-mcp/（独立小包，未入任何仓库）",
+            "tools": "search_melody(digits, fuzzy, limit) / get_song(id, inc) / stats()",
+            "install": "pip install mcp，然后照它的 README.md 把命令填进 MCP 客户端配置",
+        },
     }
 
 

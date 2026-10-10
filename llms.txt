@@ -1,0 +1,43 @@
+# 简谱旋律查歌（jianpu-db）
+
+这是什么：一个中文简谱（数字谱）曲库的只读检索接口。语料是 11,876 首谱、235 万音符，
+每首谱都存成"旋律数字串"（音高数字 1-7 加时值记号），所以可以拿一段哼出来的旋律去查是哪首歌
+（返回差分/小节位置/段落），也可以按 id 取单条。
+
+## 接口基址
+
+https://jianpu-db.org/ws/2/
+
+风格照 MusicBrainz Web Service：实体 + `inc=` + `fmt=` + `limit/offset` + `{created,count,offset,…}` 信封。
+
+- `GET /ws/2/` —— 服务的自我介绍（实体、参数、限流、一条可点开的示例地址）
+- `GET /ws/2/song?query=<旋律数字串>&fuzzy=<0|1|2>&limit=<1..100>&offset=<n>&fmt=json`
+  按旋律查歌。`query` 只认 1-7 的数字（如 `316316`），上限 200 字符。
+  命中的每一条带 `match`（`diff` 差分、`sec_cn` 段落、`bar_from`/`bar_to` 小节、`seg` 对上的那一段）。
+- `GET /ws/2/song/<id>?fmt=json&inc=artists+tags+links+sections`
+  取单条实体，**不套信封**。`id` 是 `source`（如 `qupu123-268596`）或文件名主干（如 `水手`）。
+
+## OpenAPI 契约
+
+https://jianpu-db.org/openapi.json （给人看的：https://jianpu-db.org/docs）
+
+⚠ 说实话：`/openapi.json`、`/docs`、`/redoc`、`/llms.txt` 这四条由**本机的 FastAPI 服务**提供，
+而线上 `/ws/2/*` 是 Cloudflare Worker 反代到作者本机 8770 端口那台服务上的 —— 那个上游是标准库版，
+**没有**前三者。`/llms.txt` 是静态文件，线上有。同一个原因：**本机不在线时 `/ws/2/*` 也不可用**
+（机器关了、隧道断了就查不了）。本机自检用 `http://127.0.0.1:8770/ws/2/`（FastAPI 版在 8775）。
+
+## MCP 服务器
+
+给 AI 客户端直接调用的小包 `jianpu-db-mcp`（stdio），工具是
+`search_melody(digits, fuzzy, limit)` / `get_song(id, inc)` / `stats()`。
+
+代码位置：`jianpu2` 仓库的 `_analysis/jianpu-db-mcp/`（独立小包，未入任何仓库）。
+装法与客户端配置片段见那个目录里的 `README.md`。基址可配（`JIANPU_BASE`，默认 `https://jianpu-db.org`）。
+
+## 限流与礼仪
+
+- 每 IP **每秒 1 次**请求；超出回 `503` + `Retry-After: 1`（按它退避一次再重试）。
+- 错误体一律 `{"error": "…"}`（与本站 `/api/*` 那套 `{"ok": false, "err": …}` 有意不同）。
+- 请带能识别调用方的 `User-Agent`，例如 `my-client/1.0 (+https://example.org/)`。
+- 宽查询（如 `1234` 命中上千首）时 `count` 只是"至少这么多"：`count_exact=false` 表示服务只数到那里。
+- 检索是**只读**的：不要指望在这里投稿（那走本站 `/api/submit`，需要口令）。

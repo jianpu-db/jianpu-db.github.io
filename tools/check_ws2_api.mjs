@@ -151,8 +151,14 @@ try {
   ck(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(String(env5.created)), 'created 是 ISO UTC 时间',
      String(env5.created));
   ck(typeof env5.count === 'number' && env5.count > 0, 'count 是命中数', `count=${env5.count}`);
-  ck(env5.count_exact === true, '316316 命中数不大 -> count_exact=true（count 是精确总数）',
-     `count=${env5.count} exact=${env5.count_exact}`);
+  // ⚠ 原来这里断言"316316 命中数不大 -> count_exact=true"，2026-10-10 语料涨到 28,067 行后
+  //   `316316` 的命中已经顶到计数窗口（120 条），exact 变成 false —— 断言的是**语料规模**，
+  //   不是接口行为，于是改成断言那条真正的**不变量**：精确与否必须和 count 对得上，
+  //   而且两种取值都要在自检里出现过（下面 ⑧ 的宽查询断言 exact=false，
+  //   `66563` 那条窄查询断言 exact=true），免得这里被改成"永远通过"。
+  ck(env5.count_exact === (env5.count < 120),
+     `count_exact 与 count 对得上（count<${120} => true）`,
+     `count=${env5.count} exact=${env5.count_exact}（window=${120}）`);
   ck(Array.isArray(env5.songs) && env5.songs.length === 3, 'limit=3 回 3 条', `songs=${env5.songs ? env5.songs.length : '—'}`);
   ck(env5.offset === 0, 'offset 默认 0', `offset=${env5.offset}`);
 
@@ -182,10 +188,15 @@ try {
      'offset=100 时 count 随窗口增大（且不随 limit 变小）',
      `count=${r7.json.count} -> ${r7b.json ? r7b.json.count : '—'}`);
 
-  // ⑨ limit 默认 25
-  const r8 = await get('/ws/2/song?query=66563');
+  // ⑨ limit 默认 25，并且这条**窄查询**必须报"数是精确的"（与 ⑥ 那条不变量凑成一正一反）。
+  //   `66563` 原来是窄查询，语料涨到 28,067 行后它自己变成宽查询了（count=120 exact=false），
+  //   于是换成实测 count=51 的 `6656312`；同一条断言里仍然验"不传 limit 默认 25"。
+  const r8 = await get('/ws/2/song?query=6656312');
   ck(r8.status === 200 && r8.json && r8.json.songs.length === 25, '不传 limit 时默认 25',
      `songs=${r8.json && r8.json.songs ? r8.json.songs.length : '—'}`);
+  ck(r8.json && r8.json.count_exact === true && r8.json.count < 120,
+     '窄查询（6656312）报 count_exact=true（没有假装精确，也没有白说"不精确"）',
+     `count=${r8.json ? r8.json.count : '—'} exact=${r8.json ? r8.json.count_exact : '—'}`);
 
   // ⑩ 参数校验：缺 query / 非法 limit / 非法 offset / 非法 fmt 全 400，且是 {"error": …}
   for (const [path, why] of [

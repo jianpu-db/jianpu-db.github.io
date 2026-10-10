@@ -1,0 +1,1557 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "简谱旋律查歌 · 写后端",
+    "summary": "投稿 / 补收录页 / 补标签 / 补属性 —— 校验 + 落库 + git commit + 触发索引重建",
+    "description": "这是**作者本机**那台写服务（读路径在 Cloudflare 边缘，见 `worker/index.ts`）。\n\n鉴权：配了 `JPSUBMIT_TOKEN` 时所有 `/api/*` 写请求必须带 `X-Token`（Worker 会自动注入）。\n\n口径说明：所有业务规则复用 `app/server.py`（收录页判定、简谱归一化、可改字段白名单、git 提交范围、索引重建时机），本层只做传输与校验。\n\n**只读的旋律检索 Web Service 在 `/ws/2/` 那一组**（MusicBrainz 风格）：`/ws/2/song?query=…` 按旋律数字串查歌、`/ws/2/song/<id>` 取单条、`/ws/2/` 是自述。\n\n本服务的契约说明（写进 OpenAPI 的 `description`，让生成的客户端也知道口径）：\n\n* **只读**：没有写端点。\n* **限流**：每 IP 每秒 1 次；超出回 `503` + `Retry-After: 1`（按它退避一次再重试）。\n* **错误体**：一律 `{\"error\": \"…\"}`（MusicBrainz 的形状），与本站 `/api/*` 那套 `{\"ok\": false, \"err\": …}` **有意不同**。\n* **请带 User-Agent**：能识别调用方的名字与主页，例如 `my-client/1.0 (+https://example.org/)`。\n* `count` 与 `count_exact`：宽查询时 `count` 可能只是\"至少这么多\"，`count_exact=false` 表示服务只数到那里。\n* `/ws/2/song/<id>` 的 `id`：语料的 `source`（如 `qupu123-268596`），或 `scores/` 里的文件名主干（如 `水手`）。\n* 线上 `/ws/2/*` 由 Cloudflare Worker 反代到**作者本机**的服务；本机不在线时该路由不可用（`/openapi.json`、`/docs`、`/llms.txt` 同理，见仓库根的 `llms.txt`）。\n",
+    "version": "c1"
+  },
+  "servers": [
+    {
+      "url": "https://jianpu-db.org",
+      "description": "线上（Cloudflare Worker 反代到作者本机的服务）"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "健康检查（含上游自身信息）",
+        "description": "读路径不依赖这台机器；写路径依赖。`token_required=false` 说明本机没设口令（只能内网用）。",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "summary": "只读旋律检索（按旋律数字串查歌）",
+        "description": "`?q=<旋律>&fuzzy=0&top=20` —— 只读，不需要 `X-Token`（中间件那道闸只管 `POST /api/submit`）。\n\n口径（参数校验 / 缓存 / 限流 / 输出的 JSON 形状）**只有一份**，在 `app/search_api.py`，\n与标准库版 `app/server.py` 共用，所以两边的状态码与文案不会走偏。",
+        "operationId": "search_endpoint_api_search_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ws/2/": {
+      "get": {
+        "tags": [
+          "ws2"
+        ],
+        "summary": "API 根：服务的自我介绍",
+        "description": "实体、参数、限流、一条**可点开**的示例地址，以及给人看的入口（`/openapi.json`、`/docs`）。\n\n「给人看的入口」放在这里是有意的：`/ws/2/*` 是**第三方/AI 最可能先碰到的那一层**，\n而 `/openapi.json` 挂在服务根上（不在 `/ws/2/` 前缀下），从这儿链过去才算找得到。",
+        "operationId": "ws2_root_ws_2__get",
+        "responses": {
+          "200": {
+            "description": "服务的自我介绍（实体、参数、限流、示例、文档入口）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ws2Root"
+                },
+                "example": {
+                  "name": "jianpu-db Web Service",
+                  "version": "2",
+                  "created": "2026-10-05T08:00:00Z",
+                  "read_only": true,
+                  "entities": [
+                    {
+                      "name": "song",
+                      "singular": "song",
+                      "endpoints": [
+                        "/ws/2/song/<id>",
+                        "/ws/2/song"
+                      ]
+                    }
+                  ],
+                  "parameters": {
+                    "fmt": "只支持 json（默认 json）",
+                    "inc": "要额外展开的关联数据：artists、tags、links、sections、score",
+                    "query": "检索词：要查的旋律数字串（1-7，如 316316）",
+                    "limit": "检索返回条数，默认 25，上限 100",
+                    "offset": "检索结果的偏移量（从 0 开始），默认 0"
+                  },
+                  "envelope": {
+                    "search": "{created, count, offset, songs[]}",
+                    "lookup": "单条实体直接返回对象（不套信封）"
+                  },
+                  "rate_limit": {
+                    "policy": "每 IP 每秒 1 次",
+                    "over_limit": "HTTP 503 + Retry-After: 1"
+                  },
+                  "sample": "https://jianpu-db.org/ws/2/song?query=316316&limit=5&fmt=json",
+                  "examples": [
+                    {
+                      "url": "https://jianpu-db.org/ws/2/song/qupu123-268596?fmt=json&inc=artists+tags+links+sections",
+                      "note": "单条实体（含歌手/标签/收录页/分段）"
+                    }
+                  ],
+                  "docs": {
+                    "openapi": "https://jianpu-db.org/openapi.json",
+                    "swagger": "https://jianpu-db.org/docs",
+                    "redoc": "https://jianpu-db.org/redoc",
+                    "llms": "https://jianpu-db.org/llms.txt",
+                    "note": "由 FastAPI 版本机服务提供；线上反代到的标准库版上游没有它们（会 404）"
+                  },
+                  "mcp": {
+                    "name": "jianpu-db-mcp",
+                    "transport": "stdio",
+                    "tools": "search_melody / get_song / stats",
+                    "install": "pip install mcp，然后照它的 README.md 填进 MCP 客户端配置"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数不对（缺 query / query 太长 / 认不出音高数字 / `fmt` 不是 json）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                },
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有这个实体或端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                },
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "撞上了本站 `/api/*` 那套每分钟限流（与 `/ws/2/*` 的每秒 1 次不是同一套）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                },
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务内部出错（错误体里是 `类型: 消息`，不含 traceback）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "限流：每 IP 每秒 1 次。**按 `Retry-After` 退避一次再重试**。",
+            "headers": {
+              "Retry-After": {
+                "description": "过几秒再来（现在是 1）",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                },
+                "example": {
+                  "error": "请求太快：每 IP 每秒最多 1 次，1 秒后再试"
+                }
+              }
+            }
+          }
+        },
+        "x-human-docs": {
+          "openapi": "/openapi.json",
+          "swagger": "/docs",
+          "redoc": "/redoc"
+        }
+      }
+    },
+    "/ws/2/song": {
+      "get": {
+        "tags": [
+          "ws2"
+        ],
+        "summary": "按旋律数字串检索（MusicBrainz 风格信封）",
+        "description": "命中的每一条都是完整实体 **+ `match`**（差分与位置）。\n\n`count` 与 `count_exact`：宽查询（全库上千首命中）时 `count` 只是\"至少这么多\"，\n`count_exact=false` 表示服务只数到那里 —— 分页时按 `offset`+`limit` 翻，别信 `count` 会变小。\n\n一条实际响应（截短）见 `songs[].match`：\n\n```json\n{\"created\": \"2026-10-05T08:00:00Z\", \"count\": 2, \"offset\": 0, \"count_exact\": true,\n \"songs\": [{\"id\": \"qupu123-268596\", \"title\": \"月亮代表我的心\",\n            \"match\": {\"diff\": 0, \"sec_cn\": \"副歌\", \"bar_from\": 5, \"bar_to\": 6}}]}\n```",
+        "operationId": "ws2_song_search_ws_2_song_get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "要查的**旋律数字串**：只认音高数字 1-7（如 `316316 = 咪哆啦咪哆啦`）。空格/`|`/换行分隔多段，各段在同一首谱里**按顺序**找。上限 200 个字符。别名参数 `q=` 也认（老调用方/顺手敲）。",
+              "examples": [
+                "316316",
+                "5 5 6 5 3 2 1"
+              ],
+              "default": "",
+              "title": "Query"
+            },
+            "description": "要查的**旋律数字串**：只认音高数字 1-7（如 `316316 = 咪哆啦咪哆啦`）。空格/`|`/换行分隔多段，各段在同一首谱里**按顺序**找。上限 200 个字符。别名参数 `q=` 也认（老调用方/顺手敲）。"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "`query` 的别名（两个都空才算缺参数）",
+              "default": "",
+              "title": "Q"
+            },
+            "description": "`query` 的别名（两个都空才算缺参数）"
+          },
+          {
+            "name": "fuzzy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "允许几处音对不上：`0` 精确（默认）、`1`/`2` 容忍 1 或 2 个音不同。给大了会在全库上逐窗口比对，所以上限就是 2。",
+              "examples": [
+                0
+              ],
+              "minimum": 0,
+              "maximum": 2,
+              "enum": [
+                0,
+                1,
+                2
+              ],
+              "default": 0,
+              "title": "Fuzzy"
+            },
+            "description": "允许几处音对不上：`0` 精确（默认）、`1`/`2` 容忍 1 或 2 个音不同。给大了会在全库上逐窗口比对，所以上限就是 2。"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "返回条数，默认 25，上限 100（超了钳到上限，不报错）。",
+              "examples": [
+                5,
+                25
+              ],
+              "minimum": 0,
+              "maximum": 100,
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "返回条数，默认 25，上限 100（超了钳到上限，不报错）。"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "从第几条开始（从 0 数），默认 0。翻页时 `count` 不会变小。",
+              "examples": [
+                0,
+                25
+              ],
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "从第几条开始（从 0 数），默认 0。翻页时 `count` 不会变小。"
+          },
+          {
+            "name": "fmt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "表示格式。本服务**只有 JSON 一种**：不传就是 json，传别的值回 400（也用请求头 `Accept` 判）。",
+              "examples": [
+                "json"
+              ],
+              "default": "json",
+              "title": "Fmt"
+            },
+            "description": "表示格式。本服务**只有 JSON 一种**：不传就是 json，传别的值回 400（也用请求头 `Accept` 判）。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "命中（MusicBrainz 风格信封）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchEnvelope"
+                },
+                "example": {
+                  "created": "2026-10-05T08:00:00Z",
+                  "count": 2,
+                  "offset": 0,
+                  "count_exact": true,
+                  "songs": [
+                    {
+                      "id": "qupu123-268596",
+                      "musicbrainz_work_id": "",
+                      "title": "月亮代表我的心",
+                      "file": "月亮代表我的心.txt",
+                      "source": "qupu123-268596",
+                      "site": "qupu123",
+                      "status": "ok",
+                      "transcriber": "jianpu2-auto",
+                      "alias": [],
+                      "n_notes": 68,
+                      "bars": [
+                        4,
+                        4,
+                        4
+                      ],
+                      "score": "3 5 6 1' 7 5 6 - 3 5 6 1' 7 5 6 -",
+                      "sections": [
+                        {
+                          "subtitle": "chorus",
+                          "name_cn": "副歌",
+                          "n_notes": 16,
+                          "score": "3 5 6 1' 7 5 6 -"
+                        }
+                      ],
+                      "artist-credit": [
+                        {
+                          "name": "邓丽君"
+                        }
+                      ],
+                      "artists": [
+                        "邓丽君"
+                      ],
+                      "tags": [],
+                      "match": {
+                        "diff": 0,
+                        "pos": 12,
+                        "sec": "chorus",
+                        "sec_cn": "副歌",
+                        "bar_from": 5,
+                        "bar_to": 6,
+                        "seg": "3 5 6 1 7 5 6"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数不对（缺 query / query 太长 / 认不出音高数字 / `fmt` 不是 json）",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有这个实体或端点",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "撞上了本站 `/api/*` 那套每分钟限流（与 `/ws/2/*` 的每秒 1 次不是同一套）",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务内部出错（错误体里是 `类型: 消息`，不含 traceback）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "限流：每 IP 每秒 1 次。**按 `Retry-After` 退避一次再重试**。",
+            "headers": {
+              "Retry-After": {
+                "description": "过几秒再来（现在是 1）",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "请求太快：每 IP 每秒最多 1 次，1 秒后再试"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-search-summary": {
+          "id": "qupu123-268596",
+          "title": "月亮代表我的心",
+          "n_notes": 68,
+          "match": {
+            "diff": 0,
+            "pos": 12,
+            "sec": "chorus",
+            "sec_cn": "副歌",
+            "bar_from": 5,
+            "bar_to": 6,
+            "seg": "3 5 6 1 7 5 6"
+          }
+        }
+      }
+    },
+    "/ws/2/song/{id}": {
+      "get": {
+        "tags": [
+          "ws2"
+        ],
+        "summary": "取单条实体（不套信封）",
+        "description": "`id` 是语料的 `source`（如 `qupu123-268596`），也接受 `scores/` 里的文件名主干（如 `水手`）。\n\n返回的**就是实体本身**（不套 `{created,count,…}` 信封）—— 与 MusicBrainz 的单条查询一致。\n`inc=tags` 才填 `tags`，`inc=links` 才出现 `links`；`sections` 与 `score` 是谱本身的数据，一直给。",
+        "operationId": "ws2_song_lookup_ws_2_song__id__get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          },
+          {
+            "name": "fmt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "表示格式。本服务**只有 JSON 一种**：不传就是 json，传别的值回 400（也用请求头 `Accept` 判）。",
+              "examples": [
+                "json"
+              ],
+              "default": "json",
+              "title": "Fmt"
+            },
+            "description": "表示格式。本服务**只有 JSON 一种**：不传就是 json，传别的值回 400（也用请求头 `Accept` 判）。"
+          },
+          {
+            "name": "inc",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "要**额外展开**的关联数据，多选用 `+`、空格或逗号：`artists`、`tags`、`links`、`sections`、`score`。不认识的值**被忽略**（不报错），并在响应头 `X-Unknown-Inc` 里列出。`sections`/`score` 是谱本身的数据，给不给 `inc` 都会返回",
+              "examples": [
+                "artists+tags+links+sections"
+              ],
+              "default": "",
+              "title": "Inc"
+            },
+            "description": "要**额外展开**的关联数据，多选用 `+`、空格或逗号：`artists`、`tags`、`links`、`sections`、`score`。不认识的值**被忽略**（不报错），并在响应头 `X-Unknown-Inc` 里列出。`sections`/`score` 是谱本身的数据，给不给 `inc` 都会返回"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "这一首的实体（不套信封）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SongEntity"
+                },
+                "example": {
+                  "id": "qupu123-268596",
+                  "musicbrainz_work_id": "",
+                  "title": "月亮代表我的心",
+                  "file": "月亮代表我的心.txt",
+                  "source": "qupu123-268596",
+                  "site": "qupu123",
+                  "status": "ok",
+                  "transcriber": "jianpu2-auto",
+                  "alias": [],
+                  "n_notes": 68,
+                  "bars": [
+                    4,
+                    4,
+                    4
+                  ],
+                  "score": "3 5 6 1' 7 5 6 - 3 5 6 1' 7 5 6 -",
+                  "sections": [
+                    {
+                      "subtitle": "chorus",
+                      "name_cn": "副歌",
+                      "n_notes": 16,
+                      "score": "3 5 6 1' 7 5 6 -"
+                    }
+                  ],
+                  "artist-credit": [
+                    {
+                      "name": "邓丽君"
+                    }
+                  ],
+                  "artists": [
+                    "邓丽君"
+                  ],
+                  "tags": [
+                    {
+                      "name": "流行"
+                    }
+                  ],
+                  "links": [
+                    {
+                      "type": "source-page",
+                      "url": "https://www.qupu123.com/jipu/p268596.html"
+                    }
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "X-Unknown-Inc": {
+                "description": "被忽略的 `inc` 值（逗号分隔；都在支持表里时不出现这个头）",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数不对（缺 query / query 太长 / 认不出音高数字 / `fmt` 不是 json）",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有这个实体或端点",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "撞上了本站 `/api/*` 那套每分钟限流（与 `/ws/2/*` 的每秒 1 次不是同一套）",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "缺 query（要查的旋律数字串，如 query=316316）"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务内部出错（错误体里是 `类型: 消息`，不含 traceback）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "限流：每 IP 每秒 1 次。**按 `Retry-After` 退避一次再重试**。",
+            "headers": {
+              "Retry-After": {
+                "description": "过几秒再来（现在是 1）",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "请求太快：每 IP 每秒最多 1 次，1 秒后再试"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-lookup-summary": {
+          "id": "qupu123-268596",
+          "title": "月亮代表我的心",
+          "status": "ok",
+          "n_notes": 68
+        }
+      }
+    },
+    "/api/submit": {
+      "post": {
+        "summary": "投稿 / 补收录页 / 补标签 / 补属性",
+        "description": "四种载荷按 `kind` 区分（见 `/docs` 的 schema）；返回结构与旧服务逐项一致。\n\n* `kind=link`  -> 写 `link=`（搜索页会被拒收）\n* `kind=tags`  -> 写 `usertag=`，`tag=` 由 tags.json 派生\n* `kind=attr`  -> 只改 schema 里 editable 的属性\n* `kind=new|fix|meta` -> 留档；带简谱数字时直接生成曲谱 + 触发索引重建",
+        "operationId": "submit_api_submit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkReq"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TagsReq"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AttrReq"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScoreReq"
+                  }
+                ],
+                "title": "Body",
+                "description": "按 `kind` 区分的四种投稿载荷",
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "link": "#/components/schemas/LinkReq",
+                    "tags": "#/components/schemas/TagsReq",
+                    "attr": "#/components/schemas/AttrReq",
+                    "new": "#/components/schemas/ScoreReq",
+                    "fix": "#/components/schemas/ScoreReq",
+                    "meta": "#/components/schemas/ScoreReq"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/img/{rel}": {
+      "get": {
+        "summary": "原图（R2 缺失时的回源目标）",
+        "operationId": "image_img__rel__get",
+        "parameters": [
+          {
+            "name": "rel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rel"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ArtistCredit": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "歌手名（如 `邓丽君`）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ArtistCredit",
+        "description": "`artist-credit[]`：MusicBrainz 的写法，这里只有名字。"
+      },
+      "AttrReq": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "备注（留档，会写进 feedback/*.json）",
+            "default": ""
+          },
+          "contact": {
+            "type": "string",
+            "title": "Contact",
+            "description": "联系方式（可选）",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "const": "attr",
+            "title": "Kind"
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "default": ""
+          },
+          "attr": {
+            "type": "string",
+            "title": "Attr",
+            "default": ""
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "新值（空串 = 清空）",
+            "default": ""
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "AttrReq",
+        "description": "「＋ 补属性」：只允许改 schema 里 `editable` 的属性（artist/alias/MBID/link…）。"
+      },
+      "ErrorBody": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "人话错误说明（中文）。状态码含义：400 参数不对 / 404 没有这一条 / 429 本站另一套限流 / 500 服务内部出错 / 503 限流或语料不可用"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorBody",
+        "description": "`/ws/2/*` 的错误体。MusicBrainz 风格：只有一个 `error` 键。",
+        "example": {
+          "error": "缺 query（要查的旋律数字串，如 query=316316）"
+        }
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Link": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "source-page",
+            "title": "Type",
+            "description": "关联类型，目前只有 `source-page`",
+            "default": "source-page"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "收录页 URL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "Link",
+        "description": "收录页：这一首在**原谱站那一页**的确切地址（不是搜索页）。"
+      },
+      "LinkReq": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "备注（留档，会写进 feedback/*.json）",
+            "default": ""
+          },
+          "contact": {
+            "type": "string",
+            "title": "Contact",
+            "description": "联系方式（可选）",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "const": "link",
+            "title": "Kind"
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "scores/ 下的裸文件名，如 `邓丽君_89.txt`",
+            "default": ""
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "该曲在那一站的具体页面地址",
+            "default": ""
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "LinkReq",
+        "description": "「＋ 补收录页」：给某一首补一个**具体收录页**（搜索页会被服务端拒收）。"
+      },
+      "ScoreReq": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "备注（留档，会写进 feedback/*.json）",
+            "default": ""
+          },
+          "contact": {
+            "type": "string",
+            "title": "Contact",
+            "description": "联系方式（可选）",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "new",
+              "fix",
+              "meta"
+            ],
+            "title": "Kind",
+            "default": "new"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "score": {
+            "type": "string",
+            "title": "Score",
+            "description": "简谱数字串，如 `5 5 6 5 3 2 1`",
+            "default": ""
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "kind=fix 时：要改的是哪一份（裸文件名）",
+            "default": ""
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ScoreReq",
+        "description": "投稿/纠错/补充：带简谱数字时直接生成一份曲谱进 `scores/`（反馈即入库）。"
+      },
+      "SearchEnvelope": {
+        "properties": {
+          "created": {
+            "type": "string",
+            "title": "Created",
+            "description": "服务生成这份响应的 UTC 时间（`2026-10-05T12:34:56Z`）"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "这次查询取到的命中条数（宽查询时可能只是\"至少这么多\"）"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "description": "本次返回从第几条开始（原样回显请求里的 `offset`）",
+            "default": 0
+          },
+          "songs": {
+            "items": {
+              "$ref": "#/components/schemas/SongEntity"
+            },
+            "type": "array",
+            "title": "Songs",
+            "description": "这一页的实体"
+          },
+          "count_exact": {
+            "type": "boolean",
+            "title": "Count Exact",
+            "description": "`count` 是否就是精确总命中数（本站**特有**字段，MusicBrainz 没有；宽查询时为 `false`）",
+            "default": true
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "created",
+          "count"
+        ],
+        "title": "SearchEnvelope",
+        "description": "`GET /ws/2/song` 的信封（MusicBrainz 的 `{created,count,offset,…}` 形状）。"
+      },
+      "Section": {
+        "properties": {
+          "subtitle": {
+            "type": "string",
+            "title": "Subtitle",
+            "description": "段名（原谱里的 `subtitle`，没有就叫 `score`）"
+          },
+          "name_cn": {
+            "type": "string",
+            "title": "Name Cn",
+            "description": "段名的中文标签（`sec_label` 算出来的，如 `副歌`）",
+            "default": ""
+          },
+          "n_notes": {
+            "type": "integer",
+            "title": "N Notes",
+            "description": "这一段的音符数（与 `n_notes` 同一份 token 口径）",
+            "default": 0
+          },
+          "score": {
+            "type": "string",
+            "title": "Score",
+            "description": "这一段的简谱数字串（原样，不改写不重排）",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "subtitle"
+        ],
+        "title": "Section",
+        "description": "分段（主歌/副歌…）：`sections[]` 摊平后的样子。"
+      },
+      "SongEntity": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "主键：语料的 `source`（如 `qupu123-268596`）；没有 source 时是 `f-<文件名主干>`"
+          },
+          "musicbrainz_work_id": {
+            "type": "string",
+            "title": "Musicbrainz Work Id",
+            "description": "该曲在 MusicBrainz 的 **work**（作品，不是录音）ID；没有就是空串",
+            "default": ""
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "曲名",
+            "default": ""
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "description": "曲谱文件名（`scores/` 下的裸文件名）",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "出处：`<原谱站>-<站内 id>`",
+            "default": ""
+          },
+          "site": {
+            "type": "string",
+            "title": "Site",
+            "description": "原谱站代号（`source` 的前半段，如 `qupu123`）",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "`ok`=人工校对过，`ocr`=图片机器转写，空=未知",
+            "default": ""
+          },
+          "transcriber": {
+            "type": "string",
+            "title": "Transcriber",
+            "description": "转写者（`jianpu2-auto`=流水线转的）",
+            "default": ""
+          },
+          "alias": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Alias",
+            "description": "别名（同一首歌的别的叫法）"
+          },
+          "n_notes": {
+            "type": "integer",
+            "title": "N Notes",
+            "description": "整首音符数",
+            "default": 0
+          },
+          "bars": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Bars",
+            "description": "每小节的音符数"
+          },
+          "score": {
+            "type": "string",
+            "title": "Score",
+            "description": "整首的简谱数字串（原样；**可能很大**，取单条时才有意义）",
+            "default": ""
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/Section"
+            },
+            "type": "array",
+            "title": "Sections",
+            "description": "分段；`inc` 给不给都返回（谱本身的数据）"
+          },
+          "artist-credit": {
+            "items": {
+              "$ref": "#/components/schemas/ArtistCredit"
+            },
+            "type": "array",
+            "title": "Artist-Credit",
+            "description": "MusicBrainz 写法的歌手列表（JSON 键名带连字符）"
+          },
+          "artists": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Artists",
+            "description": "歌手名的简写列表（与 `artist-credit` 同源）"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "标签；**只有 `inc=tags` 时才填**，否则是空数组"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            },
+            "type": "array",
+            "title": "Links",
+            "description": "收录页；**只有 `inc=links` 时才出现**这个键"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SongMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "**只有检索结果**才有：这一条怎么命中的"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "SongEntity",
+        "description": "一首谱（**一支曲**）。检索结果与单条实体是**同一个形状**，检索结果多一个 `match`。"
+      },
+      "SongMatch": {
+        "properties": {
+          "diff": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff",
+            "description": "允许的几个音对不上（`fuzzy=0` 时恒为 0）"
+          },
+          "pos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pos",
+            "description": "命中片段在整首谱里的起始 token 位置（从 0 数）"
+          },
+          "sec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sec",
+            "description": "命中所在段落的原名（如 `chorus`）"
+          },
+          "sec_cn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sec Cn",
+            "description": "命中所在段落的中文标签（如 `副歌`）"
+          },
+          "bar_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bar From",
+            "description": "命中起点所在小节（从 1 数）"
+          },
+          "bar_to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bar To",
+            "description": "命中终点所在小节"
+          },
+          "seg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seg",
+            "description": "命中的那一段数字串（把查询对齐到谱面上的结果）"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "SongMatch",
+        "description": "**只在检索结果里**出现：这一条是\"怎么命中的\"（差分与位置）。"
+      },
+      "Tag": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "标签名（如 `分类/儿歌`、`民歌`）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "Tag",
+        "description": "标签：`tag=`（按 tags.json 派生）与人工补的 `usertag=` 合并去重后的结果。"
+      },
+      "TagsReq": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "备注（留档，会写进 feedback/*.json）",
+            "default": ""
+          },
+          "contact": {
+            "type": "string",
+            "title": "Contact",
+            "description": "联系方式（可选）",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "const": "tags",
+            "title": "Kind"
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "default": ""
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Tags",
+            "description": "标签列表，或逗号分隔的字符串"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "TagsReq",
+        "description": "「＋ 补标签」：人工给某一首加标签（`分类/儿歌` 这种既有约定也直接写）。"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Ws2Docs": {
+        "properties": {
+          "openapi": {
+            "type": "string",
+            "title": "Openapi",
+            "description": "机器可读契约（OpenAPI 3.1，FastAPI 自动生成）",
+            "default": ""
+          },
+          "swagger": {
+            "type": "string",
+            "title": "Swagger",
+            "description": "Swagger UI（`/docs`）",
+            "default": ""
+          },
+          "redoc": {
+            "type": "string",
+            "title": "Redoc",
+            "description": "ReDoc（`/redoc`）",
+            "default": ""
+          },
+          "llms": {
+            "type": "string",
+            "title": "Llms",
+            "description": "给 AI 的发现入口（`/llms.txt`，一句话说明 + 基址 + 限流）",
+            "default": ""
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "这三个由 **FastAPI 版**本机服务提供；线上 `/ws/2/*` 反代到的标准库版上游没有它们（从线上点会 404）",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "Ws2Docs",
+        "description": "给人/给 AI 的入口（`/ws/2/` 自述里的 `docs`）。**都挂在服务根上，不在 `/ws/2/` 前缀下。**"
+      },
+      "Ws2Mcp": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务器/包的短名",
+            "default": "jianpu-db-mcp"
+          },
+          "transport": {
+            "type": "string",
+            "title": "Transport",
+            "description": "传输方式：`stdio`（本地子进程，MCP 客户端最常用）",
+            "default": "stdio"
+          },
+          "where": {
+            "type": "string",
+            "title": "Where",
+            "description": "代码放在哪儿（未入任何仓库的独立小包）",
+            "default": ""
+          },
+          "tools": {
+            "type": "string",
+            "title": "Tools",
+            "description": "它提供哪几个工具（与 OpenAPI 的端点一一对应）",
+            "default": ""
+          },
+          "install": {
+            "type": "string",
+            "title": "Install",
+            "description": "怎么装（一句话）",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "Ws2Mcp",
+        "description": "MCP（给 AI 客户端直接调用）服务器的位置与怎么装。**服务器本身不在站点仓库里。**"
+      },
+      "Ws2Root": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务名（`jianpu-db Web Service`）"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "这一层命名空间的版本（现在是 `2`）"
+          },
+          "created": {
+            "type": "string",
+            "title": "Created",
+            "description": "这份自述生成的时间（UTC，带 Z）"
+          },
+          "read_only": {
+            "type": "boolean",
+            "title": "Read Only",
+            "description": "恒为 `true`：这一层没有写端点",
+            "default": true
+          },
+          "entities": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Entities",
+            "description": "有哪些实体（目前只有 `song`）"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Parameters",
+            "description": "参数说明（`fmt`/`inc`/`query`/`limit`/`offset`）"
+          },
+          "envelope": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Envelope",
+            "description": "检索与取单条的响应该长什么样"
+          },
+          "rate_limit": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Rate Limit",
+            "description": "限流规则与 User-Agent 要求"
+          },
+          "sample": {
+            "type": "string",
+            "title": "Sample",
+            "description": "一条**可点开**的示例检索地址（不是占位符）",
+            "default": ""
+          },
+          "examples": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Examples",
+            "description": "示例地址与它演示什么"
+          },
+          "docs": {
+            "$ref": "#/components/schemas/Ws2Docs",
+            "description": "给人看的入口：`openapi`（机器可读契约）、`swagger`（/docs）、`redoc`、以及给 AI 的 `llms`"
+          },
+          "mcp": {
+            "$ref": "#/components/schemas/Ws2Mcp",
+            "description": "MCP（给 AI 客户端直接调用）服务器的位置与怎么装"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "created"
+        ],
+        "title": "Ws2Root",
+        "description": "`GET /ws/2/` —— 服务的自我介绍（实体、参数、限流、示例地址、文档入口）。"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "ws2",
+      "description": "**只读旋律检索 Web Service**（MusicBrainz 风格，`/ws/2/`）。给第三方与 AI 用：按旋律数字串查歌、取单条实体。口径只有一份，在 `app/search_api.py`（标准库版与 FastAPI 版共用）。本服务的契约说明（写进 OpenAPI 的 `description`，让生成的客户端也知道口径）：\n\n* **只读**：没有写端点。\n* **限流**：每 IP 每秒 1 次；超出回 `503` + `Retry-After: 1`（按它退避一次再重试）。\n* **错误体**：一律 `{\"error\": \"…\"}`（MusicBrainz 的形状），与本站 `/api/*` 那套 `{\"ok\": false, \"err\": …}` **有意不同**。\n* **请带 User-Agent**：能识别调用方的名字与主页，例如 `my-client/1.0 (+https://example.org/)`。\n* `count` 与 `count_exact`：宽查询时 `count` 可能只是\"至少这么多\"，`count_exact=false` 表示服务只数到那里。\n* `/ws/2/song/<id>` 的 `id`：语料的 `source`（如 `qupu123-268596`），或 `scores/` 里的文件名主干（如 `水手`）。\n* 线上 `/ws/2/*` 由 Cloudflare Worker 反代到**作者本机**的服务；本机不在线时该路由不可用（`/openapi.json`、`/docs`、`/llms.txt` 同理，见仓库根的 `llms.txt`）。\n"
+    },
+    {
+      "name": "default",
+      "description": "本站自己的接口与静态资源（`/api/*`、`/img/*`）。"
+    }
+  ]
+}

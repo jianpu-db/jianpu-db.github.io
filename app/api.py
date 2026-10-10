@@ -30,9 +30,10 @@ from __future__ import annotations
 import os
 import sys
 import time
-from typing import Annotated, Literal
+import urllib.parse
+from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -42,6 +43,7 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search_api  # noqa: E402  —— 复用同一份只读检索口径（标准库版也 import 它）
 import server  # noqa: E402  —— 复用同一份口径（校验/落库/git/重建索引）
+import ws2_schema as ws2  # noqa: E402  —— `/ws/2/*` 的 OpenAPI 契约（只有形状，没有业务）
 
 VERSION = "c1"  # C 阶段第 1 版
 
@@ -174,11 +176,25 @@ app = FastAPI(
         "这是**作者本机**那台写服务（读路径在 Cloudflare 边缘，见 `worker/index.ts`）。\n\n"
         "鉴权：配了 `JPSUBMIT_TOKEN` 时所有 `/api/*` 写请求必须带 `X-Token`（Worker 会自动注入）。\n\n"
         "口径说明：所有业务规则复用 `app/server.py`（收录页判定、简谱归一化、可改字段白名单、"
-        "git 提交范围、索引重建时机），本层只做传输与校验。"
+        "git 提交范围、索引重建时机），本层只做传输与校验。\n\n"
+        "**只读的旋律检索 Web Service 在 `/ws/2/` 那一组**（MusicBrainz 风格）：`/ws/2/song?query=…` "
+        "按旋律数字串查歌、`/ws/2/song/<id>` 取单条、`/ws/2/` 是自述。\n\n"
+        + ws2.SCHEMA_NOTES
     ),
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    # `servers`: 生成的客户端要知道"往哪儿发请求"。线上 `/ws/2/*` 走 Cloudflare Worker
+    # 反代到本机服务，对外就是这一个域名；本机调试时把 base 换成 `http://127.0.0.1:8770`
+    # 即可（或者用 MCP 服务器的 `JIANPU_BASE`，见 `_analysis/jianpu-db-mcp/README.md`）。
+    servers=[{"url": "https://jianpu-db.org", "description": "线上（Cloudflare Worker 反代到作者本机的服务）"}],
+    openapi_tags=[
+        {"name": "ws2", "description":
+         "**只读旋律检索 Web Service**（MusicBrainz 风格，`/ws/2/`）。给第三方与 AI 用："
+         "按旋律数字串查歌、取单条实体。口径只有一份，在 `app/search_api.py`（标准库版与 "
+         "FastAPI 版共用）。" + ws2.SCHEMA_NOTES},
+        {"name": "default", "description": "本站自己的接口与静态资源（`/api/*`、`/img/*`）。"},
+    ],
 )
 
 # CORS: 与旧版一致（`*`，且**不看请求有没有 Origin** —— 旧版是无条件加的，Worker→本机那一跳
@@ -341,6 +357,25 @@ async def health() -> JSONResponse:
                        "server": "fastapi", "version": VERSION})
 
 
+@app.get("/llms.txt", summary="给 AI 的发现入口（站点根那份 `llms.txt` 原样发出）",
+         response_class=PlainTextResponse, include_in_schema=False)
+def llms() -> Response:
+    """为什么由服务发一遍：这份文件在**仓库根**（与 `robots.txt` 同处，静态托管直接就能取到），
+    而本机自检常常只起着 `app/api.py`、没有静态托管 —— 服务把它原样发出来，
+    `http://127.0.0.1:8775/llms.txt` 才点得开，`/ws/2/` 自述里那条链接才不会骗人。
+
+    没这份文件就 503 + 一句人话（不 500、不空 200）。
+    """
+    path = os.path.join(server.ROOT, "llms.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return PlainTextResponse(content=f.read(), media_type="text/plain; charset=utf-8")
+    except OSError as e:
+        return PlainTextResponse(status_code=503,
+                                 content=f"这台机器上没有 {path}（{type(e).__name__}）",
+                                 media_type="text/plain; charset=utf-8")
+
+
 @app.get("/api/search", summary="只读旋律检索（按旋律数字串查歌）")
 async def search_endpoint(request: Request) -> JSONResponse:
     """`?q=<旋律>&fuzzy=0&top=20` —— 只读，不需要 `X-Token`（中间件那道闸只管 `POST /api/submit`）。
@@ -353,23 +388,242 @@ async def search_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(status_code=code, content=out, headers=headers)
 
 
-@app.get("/ws/2/{rest:path}", summary="MusicBrainz 风格只读 Web Service（/ws/2/）")
-async def ws2(rest: str, request: Request) -> JSONResponse:
-    """`/ws/2/`（API 根）、`/ws/2/song?query=…`（检索）、`/ws/2/song/<id>`（单条实体）。
+# ── 只读 Web Service `/ws/2/*`（MusicBrainz 风格）─────────────────────────────
+#
+# ⚠ 这里**有意的冗余**，写在代码里免得日后被当成"两套逻辑":
+#   * **路由挂三条**（`/ws/2/`、`/ws/2/song`、`/ws/2/song/{id}`）而不是原来那一条
+#     `@app.get("/ws/2/{rest:path}")` 兜底 —— 因为兜底路由在 `app.openapi()` 里
+#     **什么形状都长不出来**（只有一个 `rest: str` 路径参数），第三方照着它生成不出客户端。
+#     三条路由各自挂 `response_model` / `responses=`，`/openapi.json` 才是能读懂、能生成客户端的文档。
+#   * **只借用参数校验，不碰业务**：三条的**请求参数名**与 `/ws/2/` 自述、与 `llms.txt` 完全一致
+#     （`query`/`q`、`fuzzy`、`limit`、`offset`、`fmt`、`inc`），但真正执行仍然只调
+#     `search_api.ws2_handle`（与标准库版 `app/server.py` 同一个函数）—— 所以文案、状态码、
+#     限流一个字节都不会与标准库版走偏。
+#     未声明的多余查询串**原样透传**给 `ws2_handle`，它才是唯一的判据。
+_ERR = {"model": ws2.ErrorBody}
+_RATE_LIMITED = {
+    "model": ws2.ErrorBody,
+    "description": "限流：每 IP 每秒 1 次。**按 `Retry-After` 退避一次再重试**。",
+    "headers": {
+        "Retry-After": {"description": "过几秒再来（现在是 1）", "schema": {"type": "string"}},
+    },
+    "content": {"application/json": {"example": {"error": "请求太快：每 IP 每秒最多 1 次，1 秒后再试"}}},
+}
+# 给"能生成客户端的文档"再加一层：错误体与成功体都带**真实样例**。
+# 只有 schema 时，Swagger UI 里那两条错误响应是空壳、示例值是自动编的占位符；
+# 挂上 `example` 之后，`/docs` 里点开就能看见真形状（生成的客户端测试也能照着写）。
+_ERR_EXAMPLE = {
+    "application/json": {"example": {"error": "缺 query（要查的旋律数字串，如 query=316316）"}}
+}
+_COMMON_RESPONSES = {
+    400: dict(_ERR, description="参数不对（缺 query / query 太长 / 认不出音高数字 / `fmt` 不是 json）",
+              content=_ERR_EXAMPLE),
+    404: dict(_ERR, description="没有这个实体或端点", content=_ERR_EXAMPLE),
+    429: dict(_ERR, description="撞上了本站 `/api/*` 那套每分钟限流（与 `/ws/2/*` 的每秒 1 次不是同一套）",
+              content=_ERR_EXAMPLE),
+    500: dict(_ERR, description="服务内部出错（错误体里是 `类型: 消息`，不含 traceback）"),
+    503: _RATE_LIMITED,
+}
+_INC_HEADER = {
+    "X-Unknown-Inc": {"description": "被忽略的 `inc` 值（逗号分隔；都在支持表里时不出现这个头）",
+                      "schema": {"type": "string"}},
+}
 
-    口径**只有一份**：`app/search_api.py` 的 `ws2_handle`（标准库版 `app/server.py` 调的是同一个
-    函数），所以两边的信封、错误体、限流与文案不会走偏。与 `/api/*` 的三处**有意不同**（照
-    MusicBrainz 的习惯）：限流是每 IP 每秒 1 次（503 + `Retry-After: 1`）、错误体是 `{"error": …}`、
-    检索回 `{created, count, offset, songs[]}` 信封。
+_WS2_QUERY_DOC = (
+    "要查的**旋律数字串**：只认音高数字 1-7（如 `316316 = 咪哆啦咪哆啦`）。空格/`|`/换行分隔多段，"
+    "各段在同一首谱里**按顺序**找。上限 200 个字符。别名参数 `q=` 也认（老调用方/顺手敲）。"
+)
+_WS2_FMT_DOC = "表示格式。本服务**只有 JSON 一种**：不传就是 json，传别的值回 400（也用请求头 `Accept` 判）。"
+# ⚠ 下面三个整数参数的**文档口径与校验位置**（别"顺手把校验挪上来"）：
+#   唯一判据是 `search_api.ws2_search`（它自己回 400 + `{"error": …}` + 中文文案）。这一层
+#   只负责"把收到的字符串原样交给它"，同时**照着它那句文案把形状写进文档**：类型是整数、
+#   范围/枚举写在 schema 里、默认值写**整数**（`type: integer` 配 `default: "25"` 是自相矛盾的
+#   文档 —— 生成的客户端会把默认值当字符串用）。签名上标 `str` 不是懒，是为了**不自造 422**：
+#   声明成 `int` 时 FastAPI 会抢在业务层前把 `limit=abc` 判成
+#   `{"ok": false, "err": "参数不对 —— query.limit: …"}`，形状与文案都变了
+#   （两份后端的逐项对拍 `check_parity_legacy_vs_fastapi.py` 当场抓到这一条）。
+_WS2_FUZZY_DOC = ("允许几处音对不上：`0` 精确（默认）、`1`/`2` 容忍 1 或 2 个音不同。"
+                  "给大了会在全库上逐窗口比对，所以上限就是 2。")
+_WS2_LIMIT_DOC = (f"返回条数，默认 {search_api.WS2_LIMIT_DEFAULT}，上限 {search_api.WS2_LIMIT_MAX}"
+                  "（超了钳到上限，不报错）。")
+_WS2_OFFSET_DOC = "从第几条开始（从 0 数），默认 0。翻页时 `count` 不会变小。"
 
-    `{rest:path}` 也能吃下**空串**，所以 `/ws/2` 与 `/ws/2/` 两条都到这儿（不用再挂一条重复路由）。
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 参数声明的两个小工具（`_q_str` / `_q_int`）
+#
+# ⚠ 为什么整数参数在签名上是 `str`、文档里却是整数（**别"顺手改成 int"**，实测踩过）：
+#   `search_api.ws2_search` 是参数的**唯一判据** —— 它自己回
+#   `400 {"error": "limit 要是一个非负整数（给的是 abc）"}`。一旦签名声明成 `int`，
+#   FastAPI 会**抢在业务层之前**校验，错误体变成
+#   `{"ok": false, "err": "参数不对 —— query.limit: Input should be a valid integer…"}` ——
+#   形状与文案都变了（标准库版与 FastAPI 版当场不一致，逐项对拍 `check_parity_legacy_vs_fastapi.py`
+#   立刻抓到）。所以：**照收字符串、交业务层判**，但用 `json_schema_extra` 把文档写成整数
+#   （类型/范围/枚举/整数默认值都对，第三方照着生成的客户端一样是对的）。
+#   `alias=` 让"请求里叫什么"与文档一致（参数名带下划线只是为了不与 Python 关键字/内建撞）。
+# ──────────────────────────────────────────────────────────────────────────────
+def _q_str(alias: str, default: str, desc: str, examples: list[str] | None = None) -> Any:
+    return Query(default, alias=alias, description=desc, examples=examples)
+
+
+def _q_int(alias: str, default: str, desc: str, *, minimum: int = 0,
+           maximum: int | None = None, enum: list[int] | None = None,
+           examples: list[int] | None = None) -> Any:
+    """文档里是整数、值是字符串（见上面那段说明）的参数声明。
+
+    ⚠ 这里给出的默认值就是**字符串** `"25"` —— 它进的是"签名默认值"那一格，也是业务层比较的东西
+    （`isdigit()`）。FastAPI 会把它原样写进 `…"type": "integer", "default": "25"`（自相矛盾），
+    所以 `openapi()` 里还有一道 `_fix_int_defaults()` 专门把这类默认值改回整数（见那个函数）。
     """
+    schema: dict[str, Any] = {"type": "integer", "minimum": minimum}
+    if maximum is not None:
+        schema["maximum"] = maximum
+    if enum is not None:
+        schema["enum"] = enum
+    return Query(default, alias=alias, description=desc,
+                 examples=examples or [int(default)], json_schema_extra=schema)
+
+
+def _fix_int_defaults(node: Any) -> None:
+    """把"整数型参数"的默认值从字符串改回整数（**就地**改 `app.openapi()` 的产物）。
+
+    为什么需要这一道：FastAPI 生成参数 schema 时会把**签名默认值**写进 `default`，
+    而这里为了"不让 FastAPI 抢业务层的校验"（见上面那段说明）签名默认值必须是字符串 ——
+    于是文档里长出 `{"type": "integer", "default": "25"}`。它不违反 OpenAPI 规范
+    （`openapi-spec-validator` 会放行），但会把生成的客户端带偏；这一层只修这一处。
+    """
+    if isinstance(node, dict):
+        schema = node.get("schema")
+        if (isinstance(schema, dict) and schema.get("type") == "integer"
+                and isinstance(schema.get("default"), str)):
+            try:
+                schema["default"] = int(schema["default"])
+            except ValueError:
+                pass                       # 真写错的值留给自检去报，不在这儿悄悄吞掉
+        for v in node.values():
+            _fix_int_defaults(v)
+    elif isinstance(node, list):
+        for v in node:
+            _fix_int_defaults(v)
+
+
+_orig_openapi = app.openapi
+
+
+def _openapi() -> dict:
+    """`app.openapi()` 的包装：生成之后把整数参数的默认值修对（见 `_fix_int_defaults`）。"""
+    spec = _orig_openapi()
+    _fix_int_defaults(spec.get("paths") or {})
+    return spec
+
+
+app.openapi = _openapi                        # type: ignore[method-assign]
+
+
+@app.get("/ws/2/", tags=["ws2"], summary="API 根：服务的自我介绍",
+         response_model=ws2.Ws2Root, response_model_exclude_none=True,
+         responses={**_COMMON_RESPONSES,
+                    200: {"model": ws2.Ws2Root, "description": "服务的自我介绍（实体、参数、限流、示例、文档入口）",
+                          "content": {"application/json": {"example": ws2.ROOT_EXAMPLE}}}},
+         openapi_extra={"x-human-docs": {"openapi": "/openapi.json", "swagger": "/docs", "redoc": "/redoc"}})
+async def ws2_root(request: Request) -> JSONResponse:
+    """实体、参数、限流、一条**可点开**的示例地址，以及给人看的入口（`/openapi.json`、`/docs`）。
+
+    「给人看的入口」放在这里是有意的：`/ws/2/*` 是**第三方/AI 最可能先碰到的那一层**，
+    而 `/openapi.json` 挂在服务根上（不在 `/ws/2/` 前缀下），从这儿链过去才算找得到。
+    """
+    return _ws2_response("/ws/2/", request)
+
+
+@app.get("/ws/2/song", tags=["ws2"], summary="按旋律数字串检索（MusicBrainz 风格信封）",
+         response_model=ws2.SearchEnvelope, response_model_exclude_none=True,
+         responses={**_COMMON_RESPONSES,
+                    200: {"model": ws2.SearchEnvelope, "description": "命中（MusicBrainz 风格信封）",
+                          "content": {"application/json": {"example": ws2.SEARCH_EXAMPLE}}}},
+         openapi_extra={"x-search-summary": {k: v for k, v in ws2.SEARCH_EXAMPLE["songs"][0].items()
+                                             if k in ("id", "title", "n_notes", "match")}})
+async def ws2_song_search(
+    request: Request,
+    _query: str = _q_str("query", "", _WS2_QUERY_DOC, ["316316", "5 5 6 5 3 2 1"]),
+    _q: str = _q_str("q", "", "`query` 的别名（两个都空才算缺参数）"),
+    _fuzzy: str = _q_int("fuzzy", "0", _WS2_FUZZY_DOC, maximum=2, enum=[0, 1, 2]),
+    _limit: str = _q_int("limit", str(search_api.WS2_LIMIT_DEFAULT), _WS2_LIMIT_DOC,
+                         maximum=search_api.WS2_LIMIT_MAX, examples=[5, 25]),
+    _offset: str = _q_int("offset", "0", _WS2_OFFSET_DOC, examples=[0, 25]),
+    _fmt: str = _q_str("fmt", "json", _WS2_FMT_DOC, ["json"]),
+) -> JSONResponse:
+    """命中的每一条都是完整实体 **+ `match`**（差分与位置）。
+
+    `count` 与 `count_exact`：宽查询（全库上千首命中）时 `count` 只是"至少这么多"，
+    `count_exact=false` 表示服务只数到那里 —— 分页时按 `offset`+`limit` 翻，别信 `count` 会变小。
+
+    一条实际响应（截短）见 `songs[].match`：
+
+    ```json
+    {"created": "2026-10-05T08:00:00Z", "count": 2, "offset": 0, "count_exact": true,
+     "songs": [{"id": "qupu123-268596", "title": "月亮代表我的心",
+                "match": {"diff": 0, "sec_cn": "副歌", "bar_from": 5, "bar_to": 6}}]}
+    ```
+    """
+    return _ws2_response("/ws/2/song", request)
+
+
+@app.get("/ws/2/song/{id}", tags=["ws2"], summary="取单条实体（不套信封）",
+         response_model=ws2.SongEntity, response_model_exclude_none=True,
+         responses={**_COMMON_RESPONSES,
+                    200: {"model": ws2.SongEntity, "description": "这一首的实体（不套信封）",
+                          "headers": _INC_HEADER,
+                          "content": {"application/json": {"example": ws2.LOOKUP_EXAMPLE}}}},
+         openapi_extra={"x-lookup-summary": {k: v for k, v in ws2.LOOKUP_EXAMPLE.items()
+                                             if k in ("id", "title", "n_notes", "status")}})
+async def ws2_song_lookup(
+    id: str,  # noqa: A002 —— 参数名就是 URL 里的那个（`/ws/2/song/{id}`），与 MusicBrainz 一致
+    request: Request,
+    _fmt: str = _q_str("fmt", "json", _WS2_FMT_DOC, ["json"]),
+    _inc: str = _q_str("inc", "", "要**额外展开**的关联数据，多选用 `+`、空格或逗号："
+                                  "`artists`、`tags`、`links`、`sections`、`score`。"
+                                  "不认识的值**被忽略**（不报错），并在响应头 `X-Unknown-Inc` 里列出。"
+                                  "`sections`/`score` 是谱本身的数据，给不给 `inc` 都会返回",
+                       ["artists+tags+links+sections"]),
+) -> JSONResponse:
+    """`id` 是语料的 `source`（如 `qupu123-268596`），也接受 `scores/` 里的文件名主干（如 `水手`）。
+
+    返回的**就是实体本身**（不套 `{created,count,…}` 信封）—— 与 MusicBrainz 的单条查询一致。
+    `inc=tags` 才填 `tags`，`inc=links` 才出现 `links`；`sections` 与 `score` 是谱本身的数据，一直给。
+    """
+    return _ws2_response("/ws/2/song/" + request.path_params.get("id", ""), request)
+
+
+def _ws2_response(path: str, request: Request, **overrides) -> JSONResponse:
+    """把请求交给 `search_api.ws2_handle`（口径只有那一份），只负责搬上 HTTP。
+
+    两个后端（FastAPI 版与标准库版）在这里调的是同一个函数，所以状态码/文案/限流不会走偏。
+
+    `overrides`：路由签名上那些**带类型的参数**（`limit`/`offset`/`fuzzy`），值是 Python 原类型
+    （`limit=25`）而不是字符串，**原类型不能直接拼进查询串**（`ws2_search` 里的 `isdigit()` 会当场
+    把 `limit=25` 判成非法）。所以这里统一转成字符串再拼；等于默认值的**不写**（省得把
+    `limit=25` 显式塞进去，把"没传"变成"传了默认值"）。
+    未在签名里声明的参数（`fmt`、`inc`、`q`…）**原样透传** —— `ws2_handle` 才是唯一判据。
+    """
+    pairs = [(k, v) for k, v in (overrides or {}).items()
+             if v is not None and str(v) not in ("", "0", "25")]
+    qs = "&".join(f"{urllib.parse.quote(str(k))}={urllib.parse.quote(str(v))}" for k, v in pairs)
     code, out, headers = search_api.ws2_handle(
-        request.url.path, request.url.query,
+        path, qs or request.url.query or "",
         request.client.host if request.client else "",
         request.headers.get("accept") or "",
         search_api.base_url_from_host(request.headers.get("host") or ""))
     return JSONResponse(status_code=code, content=out, headers=headers)
+
+
+@app.get("/ws/2/{rest:path}", include_in_schema=False, tags=["ws2"])
+async def ws2_other(rest: str, request: Request) -> JSONResponse:
+    """兜底：`/ws/2/` 下的**其它路径**照旧交给同一份口径（它自己会回 404 + 人话）。
+
+    文档里**不列**它（`include_in_schema=False`）—— 上面三条已经把契约说完了，
+    再列一条 `rest: str` 的兜底路由只会让生成的客户端以为"这里能吃任意路径"。
+    """
+    return _ws2_response(request.url.path, request)
 
 
 @app.post("/api/submit", summary="投稿 / 补收录页 / 补标签 / 补属性")

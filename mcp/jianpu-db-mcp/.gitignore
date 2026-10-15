@@ -1,0 +1,13 @@
+# 不入库的东西：
+# 注: gitignore **不支持行尾注释** —— 注释必须单独成行, 否则整行会被当成一个匹配不到的图案。
+#     (2026-10-15 入库时实测: 原先写成 `.venv/    # 平台相关…`, 结果 .venv/ 与 out/ 都没被忽略。)
+.venv/
+# ^ 平台相关、67 MB、可重建（python -m venv + pip install -r requirements.txt）
+__pycache__/
+*.pyc
+out/
+# ^ 证据脚本的输出（parity.json / call_tools.log 之类）
+*.log
+
+# corpus/*.jsonl.gz **故意不忽略**：这个包"离线可用"就靠它们（见 README「包内结构」）。
+# 它们的 sha256/行数记在 corpus/manifest.json 里，被换掉了能对得出来。

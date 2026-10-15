@@ -1,0 +1,11 @@
+# jianpu-db-mcp 的依赖——只有一个：官方的 MCP Python SDK。
+# 装：python -m venv .venv && .venv\Scripts\python -m pip install -r requirements.txt
+#
+# 离线模式（默认）只用标准库（gzip/json）+ 这个 SDK，不需要任何别的东西；
+# 远程模式（设了 JIANPU_BASE）用标准库 urllib，也不需要别的东西。
+# `psutil` **可选**：只在 `stats()`/`--preload` 里用来打印常驻内存（没装就走 ctypes 读，
+# 再不行就返回 null），不装照样跑。
+#
+# 想用 `mcp dev`（带 Inspector 的网页调试）再装 CLI 那一组：
+#   .venv\Scripts\python -m pip install "mcp[cli]"
+mcp>=1.9

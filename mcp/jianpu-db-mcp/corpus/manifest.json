@@ -1,0 +1,139 @@
+{
+  "generated_at": "2026-10-15 18:00:46",
+  "generated_by": "rebuild_index.py（jianpu-db-mcp 0.2.0）",
+  "source": {
+    "path": "D:\\Documents_D\\jianpu-db\\data.jsonl",
+    "size": 76982558,
+    "mtime": "2026-10-15 17:46:56",
+    "mtime_ns": 1792057616173565200,
+    "sha256": "3d0ead4b8a90b679d06a904ef4a17529241d3fdf1322995ab40f55203d0b84aa",
+    "lines": 38467
+  },
+  "slim": {
+    "path": "D:\\Documents_D\\_analysis\\jianpu-db-mcp\\corpus\\slim.jsonl.gz",
+    "size": 10350730,
+    "sha256": "bd123de6c326292deffe9670b31591dc4a274b06976e9969d0f13d03b1018f9a",
+    "lines": 38467,
+    "fields": [
+      "file",
+      "title",
+      "artist",
+      "tag",
+      "source",
+      "status",
+      "n_notes",
+      "bars",
+      "sections",
+      "score"
+    ]
+  },
+  "index": {
+    "path": "D:\\Documents_D\\_analysis\\jianpu-db-mcp\\corpus\\index.jsonl.gz",
+    "size": 12563307,
+    "sha256": "2756200a453617c05bace5645ee1d130b22750161b197863b77812338166a66d",
+    "rows": 38467,
+    "index_version": 1,
+    "fields": [
+      "id",
+      "file",
+      "title",
+      "artist",
+      "tag",
+      "source",
+      "site",
+      "status",
+      "n_notes",
+      "bars",
+      "digits",
+      "sec",
+      "sections",
+      "score",
+      "pop",
+      "hot"
+    ],
+    "build_seconds": 66.7,
+    "used_matcher_cache": true
+  },
+  "counts": {
+    "songs": 38467,
+    "notes": 7879837,
+    "groups": 28085,
+    "sources": {
+      "fysongs": 21612,
+      "qupu123": 6033,
+      "jianpujia": 4490,
+      "jianpucn": 4375,
+      "jp114": 1412,
+      "abcgh": 492,
+      "(无 source)": 42,
+      "unknown": 6,
+      "21qupu": 2,
+      "qpcxw": 2,
+      "qinyipu": 1
+    },
+    "status": {
+      "ocr": 37933,
+      "converted": 492,
+      "ok": 42
+    },
+    "status_ok_lines": 38467,
+    "skipped_no_digits": 0,
+    "duplicate_ids": 2408
+  },
+  "matcher": {
+    "melody_search": "D:\\Documents_D\\_analysis\\jianpu-db-mcp\\jianpu_mcp\\melody_search_vendored.py",
+    "jptok": "D:\\Documents_D\\_analysis\\jianpu-db-mcp\\jianpu_mcp\\jptok_vendored.py",
+    "TOKVER": 5,
+    "OK_STATUS": [
+      "ok",
+      "ocr",
+      "converted"
+    ],
+    "MAX_GAP": 8,
+    "ALIGN_MAX": 300,
+    "OCC_CAP": 96,
+    "SECTION_WEIGHTS": {
+      "chorus": 1.6,
+      "refrain": 1.6,
+      "verse": 1.25,
+      "pre-chorus": 1.1,
+      "bridge": 1.1,
+      "interlude": 1.1,
+      "score": 1.0,
+      "intro": 0.8,
+      "outro": 0.8,
+      "layer": 0.8,
+      "crazy-piano": 0.8
+    }
+  },
+  "verify": {
+    "compared": 38467,
+    "index_rows": 38467,
+    "mismatches": 0,
+    "duplicate_ids": 2408,
+    "duplicate_id_examples": [
+      [
+        "jianpucn-52295",
+        7
+      ],
+      [
+        "unknown",
+        6
+      ],
+      [
+        "qupu123-394898",
+        5
+      ],
+      [
+        "qupu123-394702",
+        5
+      ],
+      [
+        "jianpujia-388543",
+        4
+      ]
+    ],
+    "examples": [],
+    "seconds": 109.4
+  }
+}

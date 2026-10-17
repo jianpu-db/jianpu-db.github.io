@@ -97,11 +97,26 @@ function esc(s) {
   });
 }
 
+/* 出处站: 站首页 + 「能不能直接从 source 拼出那一页」。
+ * fysongs(风雅颂)的曲页是 `songku_show.asp?id=N`，而 source 本身就叫 `fysongs-47259`
+ * （id 就是爬虫抓的那页 id）—— 所以 26,132 首 fysongs 不用等 srcurl 核对表也能点回原页。
+ * 其余站没有这种"id 就是页参"的结构，只能退到站首页。 */
+type SrcSite = { home: string; page?: string };
+var SRC_SITES: Record<string, SrcSite> = {
+  qupu123: { home: 'https://www.qupu123.com/' },
+  jianpucn: { home: 'http://www.jianpu.cn/' },
+  jianpujia: { home: 'https://www.jianpujia.com/' },
+  fysongs: { home: 'http://www.fysongs.cn/', page: 'http://www.fysongs.cn/songku_show.asp?id=' }
+};
 function sourceUrl(src) {
-  var host = String(src || '').split('-')[0];
-  var m = { qupu123: 'https://www.qupu123.com/', jianpucn: 'http://www.jianpu.cn/',
-            jianpujia: 'https://www.jianpujia.com/' };
-  return m[host] || '';
+  var s = String(src || '');
+  var i = s.indexOf('-');
+  var host = i < 0 ? s : s.slice(0, i);
+  var id = i < 0 ? '' : s.slice(i + 1);
+  var site = SRC_SITES[host];
+  if (!site) return '';
+  if (site.page && id) return site.page + encodeURIComponent(id);
+  return site.home;
 }
 
 /* 站点标签: 从 URL 的 host 认(不靠人的命名习惯) */
@@ -393,14 +408,6 @@ function run(e?: { preventDefault: () => void }) {
 }
 
 /* 元数据全摊开: 一行一项, 空的显示 — —— 用户要求"不光标题, 别的元数据也都一并摊开" */
-/* 站点首页: 把 `qupu123-268596` 这类 source 映射回该站首页(源码站可点) */
-function siteUrl(src) {
-  var host = String(src || '').split('-')[0];
-  var m = { qupu123: 'https://www.qupu123.com/', jianpucn: 'http://www.jianpu.cn/',
-            jianpujia: 'https://www.jianpujia.com/' };
-  return m[host] || '';
-}
-
 /* 每个属性的**值**怎么渲染(卡片表格里的那一列)。键与 FIELDS 同; 没列到的属性走 default 分支。
  * 显示**名**不在这儿 —— 那是 schema 的事(见上面 FIELDS)。 */
 var FIELD_VALUE = {

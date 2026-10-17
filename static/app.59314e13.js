@@ -39,14 +39,21 @@ function esc(s) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
   });
 }
+var SRC_SITES = {
+  qupu123: { home: "https://www.qupu123.com/" },
+  jianpucn: { home: "http://www.jianpu.cn/" },
+  jianpujia: { home: "https://www.jianpujia.com/" },
+  fysongs: { home: "http://www.fysongs.cn/", page: "http://www.fysongs.cn/songku_show.asp?id=" }
+};
 function sourceUrl(src) {
-  var host = String(src || "").split("-")[0];
-  var m = {
-    qupu123: "https://www.qupu123.com/",
-    jianpucn: "http://www.jianpu.cn/",
-    jianpujia: "https://www.jianpujia.com/"
-  };
-  return m[host] || "";
+  var s = String(src || "");
+  var i2 = s.indexOf("-");
+  var host = i2 < 0 ? s : s.slice(0, i2);
+  var id = i2 < 0 ? "" : s.slice(i2 + 1);
+  var site = SRC_SITES[host];
+  if (!site) return "";
+  if (site.page && id) return site.page + encodeURIComponent(id);
+  return site.home;
 }
 var SITE_LABELS = [
   [/music\.163\.com/, "网易云音乐"],
@@ -275,15 +282,6 @@ function run(e) {
     render(segs, res, Math.round(performance.now() - t0));
     $("go").disabled = false;
   }, 20);
-}
-function siteUrl(src) {
-  var host = String(src || "").split("-")[0];
-  var m = {
-    qupu123: "https://www.qupu123.com/",
-    jianpucn: "http://www.jianpu.cn/",
-    jianpujia: "https://www.jianpujia.com/"
-  };
-  return m[host] || "";
 }
 var FIELD_VALUE = {
   file: function(r, h) {

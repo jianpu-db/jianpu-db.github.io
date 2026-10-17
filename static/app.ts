@@ -98,14 +98,15 @@ function esc(s) {
 }
 
 /* 出处站: 站首页 + 「能不能直接从 source 拼出那一页」。
- * fysongs(风雅颂)的曲页是 `songku_show.asp?id=N`，而 source 本身就叫 `fysongs-47259`
- * （id 就是爬虫抓的那页 id）—— 所以 26,132 首 fysongs 不用等 srcurl 核对表也能点回原页。
+ * 两家站的 source 后半段就是爬虫抓的那页 id，不用等 srcurl 核对表也能点回原页：
+ *   fysongs(风雅颂)  `songku_show.asp?id=N`
+ *   jianpujia(简谱之家) `/jianpu/N.html`（爬虫 crawl_jianpujia_shard.py:192 的模板，抽 12 个真实 id 全 200）
  * 其余站没有这种"id 就是页参"的结构，只能退到站首页。 */
-type SrcSite = { home: string; page?: string };
+type SrcSite = { home: string; page?: string; tail?: string };
 var SRC_SITES: Record<string, SrcSite> = {
   qupu123: { home: 'https://www.qupu123.com/' },
   jianpucn: { home: 'http://www.jianpu.cn/' },
-  jianpujia: { home: 'https://www.jianpujia.com/' },
+  jianpujia: { home: 'https://www.jianpujia.com/', page: 'http://www.jianpujia.com/jianpu/', tail: '.html' },
   fysongs: { home: 'http://www.fysongs.cn/', page: 'http://www.fysongs.cn/songku_show.asp?id=' }
 };
 function sourceUrl(src) {
@@ -115,7 +116,7 @@ function sourceUrl(src) {
   var id = i < 0 ? '' : s.slice(i + 1);
   var site = SRC_SITES[host];
   if (!site) return '';
-  if (site.page && id) return site.page + encodeURIComponent(id);
+  if (site.page && id) return site.page + encodeURIComponent(id) + (site.tail || '');
   return site.home;
 }
 

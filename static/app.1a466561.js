@@ -42,7 +42,7 @@ function esc(s) {
 var SRC_SITES = {
   qupu123: { home: "https://www.qupu123.com/" },
   jianpucn: { home: "http://www.jianpu.cn/" },
-  jianpujia: { home: "https://www.jianpujia.com/" },
+  jianpujia: { home: "https://www.jianpujia.com/", page: "http://www.jianpujia.com/jianpu/", tail: ".html" },
   fysongs: { home: "http://www.fysongs.cn/", page: "http://www.fysongs.cn/songku_show.asp?id=" }
 };
 function sourceUrl(src) {
@@ -52,7 +52,7 @@ function sourceUrl(src) {
   var id = i2 < 0 ? "" : s.slice(i2 + 1);
   var site = SRC_SITES[host];
   if (!site) return "";
-  if (site.page && id) return site.page + encodeURIComponent(id);
+  if (site.page && id) return site.page + encodeURIComponent(id) + (site.tail || "");
   return site.home;
 }
 var SITE_LABELS = [

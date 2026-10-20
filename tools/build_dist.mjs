@@ -184,6 +184,8 @@ put(join(ROOT, 'sitemap.xml'), 'sitemap.xml');
 // AI 客户端的发现入口（2026-10-10 加）: 一句话说明这是什么、接口基址、契约在哪、限流规则。
 // 放在仓库根 = 站点根（与 robots.txt 同一个位置），GitHub Pages 与 Cloudflare 两个目标都会带上它。
 put(join(ROOT, 'llms.txt'), 'llms.txt');
+// 搜索引擎站点验证（2026-10-20 加）: Bing 的 BingSiteAuth.xml 必须能从站点根直接取到。
+put(join(ROOT, 'BingSiteAuth.xml'), 'BingSiteAuth.xml');
 
 if (TARGET === 'cf') {
   // 缓存策略: 交给 Cloudflare 的 _headers(assets 支持)。数据每次 push 都重新部署,

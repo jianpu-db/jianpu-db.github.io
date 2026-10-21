@@ -203,6 +203,11 @@ var FIELDS: Record<string, Field> = {
   file: { label: { zh: '文件', en: 'File' }, kind: 'readonly' },
   group: { label: { zh: '曲名', en: 'Title' }, kind: 'readonly' },
   artist: { label: { zh: '歌手', en: 'Artist' }, kind: 'list', editable: true, hint: '邓丽君（多个用逗号）' },
+  // 歌曲信息的制作名单(2026-10-20 用户口径): 与歌手并列的元数据行, 不是注释
+  album: { label: { zh: '专辑', en: 'Album' }, kind: 'list', editable: true, hint: '所属专辑' },
+  lyricist: { label: { zh: '作词', en: 'Lyricist' }, kind: 'list', editable: true, hint: '作词人' },
+  composer: { label: { zh: '作曲', en: 'Composer' }, kind: 'list', editable: true, hint: '作曲人' },
+  arranger: { label: { zh: '编曲', en: 'Arranger' }, kind: 'list', editable: true, hint: '编曲人' },
   status: { label: { zh: '状态', en: 'Status' }, kind: 'readonly' },
   n: { label: { zh: '音符', en: 'Notes' }, kind: 'readonly' },
   bars: { label: { zh: '小节', en: 'Bars' }, kind: 'readonly' },
@@ -440,6 +445,10 @@ var FIELD_VALUE = {
   file: function (r, h) { return r.file && r.file.length ? h.esc(h.list(r.file)) : '—'; },
   group: function (r, h) { return h.esc(r.group); },
   artist: function (r, h) { return r.artist && r.artist.length ? h.esc(h.list(r.artist)) : '—'; },
+  album: function (r, h) { return r.album && r.album.length ? h.esc(h.list(r.album)) : '—'; },
+  lyricist: function (r, h) { return r.lyricist && r.lyricist.length ? h.esc(h.list(r.lyricist)) : '—'; },
+  composer: function (r, h) { return r.composer && r.composer.length ? h.esc(h.list(r.composer)) : '—'; },
+  arranger: function (r, h) { return r.arranger && r.arranger.length ? h.esc(h.list(r.arranger)) : '—'; },
   status: function (r, h) {
     return h.esc(r.status || '?') + (r.status === 'ok' ? '（人工校对过）'
       : r.status === 'ocr' ? '（图片机器转写）' : '');

@@ -321,6 +321,12 @@ def main():
             "alias": r.get("alias") or [],
             # 歌手(独立字段, 2026-09-24): 通用曲名靠它区分谁是谁
             "artist": r.get("artist") or [],
+            # 制作名单(2026-10-20 用户口径): 专辑/作词/作曲/编曲 与原谱页面的「歌曲信息」一致,
+            # 与歌手并列; 都没有时是空列表(前端那一行不显示, 不造假)
+            "album": r.get("album") or [],
+            "lyricist": r.get("lyricist") or [],
+            "composer": r.get("composer") or [],
+            "arranger": r.get("arranger") or [],
             # 知名度代理(见上面 hotmap 的说明): 并列时的第一顺位
             "hot": max([hotmap.get(x, 0) for x in
                         list(r.get("artist") or []) + [t for t in (r.get("tag") or []) if not str(t).startswith("分类/")]]

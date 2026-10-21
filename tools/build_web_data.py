@@ -229,6 +229,30 @@ def main():
             srcpages = json.load(io.open(_sp, encoding="utf-8"))
         except Exception as e:
             print("! source_pages.json 读不动: %s" % e)
+
+    # 能直接从 source 拼出原页的站(规则与前端 static/app.ts 的 SRC_SITES 一致):
+    #   fysongs-47259  -> http://www.fysongs.cn/songku_show.asp?id=47259
+    #   jianpujia-7146 -> http://www.jianpujia.com/jianpu/7146.html (爬虫模板 crawl_jianpujia_shard.py:192)
+    #   je-1202        -> https://github.com/zytx121/je/issues/1202  (自由神社曲谱库: 一首谱一个 issue)
+    # 其余站没有"id 就是页参"的结构, 只能靠 source_pages.json 里核对过的 url。
+    SRC_PAGE = {
+        "fysongs": ("http://www.fysongs.cn/songku_show.asp?id=", ""),
+        "jianpujia": ("http://www.jianpujia.com/jianpu/", ".html"),
+        "je": ("https://github.com/zytx121/je/issues/", ""),
+    }
+
+    def page_url(src):
+        """source -> 原谱页 URL: 先认核对表, 再按站模板拼, 都没有就给空串。"""
+        if not src:
+            return ""
+        hit = (srcpages.get(src) or {}).get("url")
+        if hit:
+            return hit
+        host, _, sid = src.partition("-")
+        tpl = SRC_PAGE.get(host)
+        if tpl and sid:
+            return tpl[0] + sid + tpl[1]
+        return ""
     for ln in io.open(a.data, encoding="utf-8"):
         ln = ln.strip()
         if not ln:
@@ -276,7 +300,7 @@ def main():
             #   links  = 人工核对后写进 scores/<file>.txt 的 `link=`(可多个)
             #   srcurl = 原谱站那一页(由 source 的站点+ID 推出并抓取核对过)
             "links": [str(x) for x in (r.get("link") or [])],
-            "srcurl": (srcpages.get(src) or {}).get("url", "") if src else "",
+            "srcurl": page_url(src),
             "raw": " ".join(toks if len(toks) < 400 else toks[:400]),
             "trunc": len(toks) > 400,
             # 原谱原文(verbatim): 用户写的文件一字不差, 多节/KeepLength/节头都保留

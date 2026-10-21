@@ -107,7 +107,9 @@ var SRC_SITES: Record<string, SrcSite> = {
   qupu123: { home: 'https://www.qupu123.com/' },
   jianpucn: { home: 'http://www.jianpu.cn/' },
   jianpujia: { home: 'https://www.jianpujia.com/', page: 'http://www.jianpujia.com/jianpu/', tail: '.html' },
-  fysongs: { home: 'http://www.fysongs.cn/', page: 'http://www.fysongs.cn/songku_show.asp?id=' }
+  fysongs: { home: 'http://www.fysongs.cn/', page: 'http://www.fysongs.cn/songku_show.asp?id=' },
+  /* 自由神社曲谱库 2.0: 一首谱就是一个 issue，source 写成 `je-<issue号>` 就能拼回原帖 */
+  je: { home: 'https://github.com/zytx121/je', page: 'https://github.com/zytx121/je/issues/' }
 };
 function sourceUrl(src) {
   var s = String(src || '');
@@ -133,6 +135,7 @@ var SITE_LABELS: SiteLabel[] = [
   [/jianpujia\.com/, '简谱之家'],
   [/qupu123\.com/, '中国曲谱网'],
   [/qinyipu\.com/, '琴艺谱'],
+  [/github\.com\/zytx121\/je/, '自由神社曲谱库'],
 ];
 function siteLabel(u) {
   for (var i = 0; i < SITE_LABELS.length; i++) if (SITE_LABELS[i][0].test(u)) return SITE_LABELS[i][1];

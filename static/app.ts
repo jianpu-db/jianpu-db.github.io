@@ -72,14 +72,12 @@ function $<T extends HTMLElement = HTMLElement>(id: string): T {
 }
 var IDX: Index | null = null;
 
-function loadCorpus() {
-  if (typeof DecompressionStream === 'undefined') {
-    return fetch(appUrl('data/songs.jsonl')).then(function (r) { return r.text(); });
-  }
-  return fetch(appUrl('data/songs.jsonl.gz')).then(function (r) {
+/* 解一份 gzip(接口不同实现不同, 见下), 返回纯文本 */
+function gunzipText(p) {
+  return p.then(function (r) {
     // 两种服务端行为都得认:
     //   ① 替我们解好并带 `Content-Encoding: gzip`(某些静态托管会这么干) -> 直接读文本;
-    //   ② 原样发 gzip 字节(Cloudflare Pages 就是这样) -> 自己解。
+    //   ② 原样发 gzip 字节(Cloudflare Pages/Worker 就是这样) -> 自己解。
     // 头/方法都不是必然存在(自检里的假 fetch 就只有 `{ok, body}`), 所以每处先问一句再说 ——
     // 2026-09-25 就是把 `r.headers.get` 当成必然存在, 初始化当场炸, 被 check_render/page/ui/tune 抓到。
     if (r.headers && r.headers.get && /gzip/i.test(r.headers.get('content-encoding') || '')) return r.text();
@@ -88,6 +86,30 @@ function loadCorpus() {
     return new Response(body.pipeThrough(new DecompressionStream('gzip'))).text()
       .catch(function () { return (typeof r.text === 'function') ? r.text() : ''; });
   });
+}
+
+function loadCorpus() {
+  if (typeof DecompressionStream === 'undefined') {
+    return fetch(appUrl('data/songs.jsonl')).then(function (r) { return r.text(); });
+  }
+  // 分片优先: Cloudflare Workers 静态资源单文件上限 25 MiB(改套餐也改不了),
+  // 语料过 5.6 万首后整份 songs.jsonl.gz 装不下, build_web_data.py 会切成
+  // songs.partNN.jsonl.gz + index.json(每片各自 gzip, 按 index.json 的顺序拼回一整份)。
+  // 没有 index.json 时退回整份, 再退回明文。
+  return fetch(appUrl('data/index.json'))
+    .then(function (r) { return (r && r.ok) ? r.json() : null; })
+    .catch(function () { return null; })
+    .then(function (idx) {
+      if (!idx || !idx.parts || !idx.parts.length) return null;
+      return Promise.all(idx.parts.map(function (p) {
+        return gunzipText(fetch(appUrl('data/' + p.file)));
+      })).then(function (texts) { return texts.join(''); });
+    })
+    .then(function (txt) {
+      return (txt === null || txt === undefined)
+        ? gunzipText(fetch(appUrl('data/songs.jsonl.gz')))
+        : txt;
+    });
 }
 
 

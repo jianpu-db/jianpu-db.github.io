@@ -29,3 +29,7 @@ docs/QA.md
 docs/交付总结.md
 docs/MOCK_INTERVIEW.md
 docs/RESUME.md
+
+# 语料过 5.6 万首后整份 gz 是 26.6 MB, 超过 Cloudflare 单文件 25 MiB 上限;
+# 已改为 data/songs.partNN.jsonl.gz + index.json(build_web_data.py 自动切)
+data/songs.jsonl.gz

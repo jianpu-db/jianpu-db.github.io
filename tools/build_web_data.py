@@ -14,6 +14,7 @@
 用法: py -3.13 tools/build_web_data.py [--data 路径] [--out 目录] [--no-images]
 """
 import argparse
+import glob
 import gzip
 import io
 import json
@@ -365,6 +366,47 @@ def main():
     with io.open(os.path.join(a.out, "songs.jsonl"), "w", encoding="utf-8", newline="\n") as g:
         for r in rows:
             g.write(json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+    # ---- 分片(Coreflare Workers 静态资源单文件上限 25 MiB, 改套餐也改不了) ----
+    # 语料过 5.6 万首后 songs.jsonl.gz 到了 26.6 MB, 整份部署会被拒。
+    # 这里按行切成若干片、**每片单独 gzip**(每片都能独立解压), 再写一份 index.json
+    # 告诉前端按什么顺序拼。片大小按"未压缩 40 MiB"切, 压完一片约 6-7 MiB。
+    CHUNK_RAW = 40 * 1024 * 1024
+    for old in glob.glob(os.path.join(a.out, "songs.part*.jsonl.gz")):
+        os.remove(old)
+    parts_meta, chunk, chunk_bytes = [], [], 0
+
+    def _flush_part(buf, no):
+        name = "songs.part%02d.jsonl.gz" % no
+        path = os.path.join(a.out, name)
+        with open(path, "wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, compresslevel=9, mtime=0) as g:
+                g.write("".join(buf).encode("utf-8"))
+        parts_meta.append({"file": name, "songs": len(buf), "bytes": os.path.getsize(path)})
+
+    for r in rows:
+        line = json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n"
+        chunk.append(line)
+        chunk_bytes += len(line.encode("utf-8"))
+        if chunk_bytes >= CHUNK_RAW:
+            _flush_part(chunk, len(parts_meta) + 1)
+            chunk, chunk_bytes = [], 0
+    if chunk:
+        _flush_part(chunk, len(parts_meta) + 1)
+
+    idx_path = os.path.join(a.out, "index.json")
+    if len(parts_meta) > 1:
+        with io.open(idx_path, "w", encoding="utf-8", newline="\n") as g:
+            json.dump({"v": 1, "format": "songs-jsonl-gz-parts", "songs": len(rows),
+                       "parts": parts_meta}, g, ensure_ascii=False, separators=(",", ":"))
+        print("  分片: %d 片 · %s（单文件上限 25 MiB, 整份 %.1f MB 装不下）"
+              % (len(parts_meta), " · ".join("%.1f MB" % (p["bytes"] / 1e6) for p in parts_meta),
+                 os.path.getsize(outj) / 1e6))
+    else:
+        if os.path.isfile(idx_path):
+            os.remove(idx_path)
+        print("  分片: 不需要(整份 %.1f MB < 上限)" % (os.path.getsize(outj) / 1e6))
+
     # 收录平台表(搜索页格式的**唯一真源**在 jianpu-db/schema.py) -> 塞进 stats.json 给前端读。
     # 前端不自己写一份, 免得"每个平台的搜索 URL 长什么样"漂成两处。
     platforms = []

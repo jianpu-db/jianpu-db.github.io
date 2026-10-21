@@ -29,7 +29,7 @@
  *   .gitignore 掉**的, 云端构建拿不到它们。所以没有 DecompressionStream 的老浏览器在云端
  *   会走不通(本机部署仍然有回退)。要支持就把它俩也提交进仓库, 然后在这里加两行。
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +61,17 @@ const STATIC_FILES = ['jptok.js', 'search.js', 'style.css', 'app.js'];   // 名�
 //   既不转存扫描件也不外链图片; 原站页面地址在「出处」/「收录页」里。所以线上不需要图索引。
 // `og.json` = 「每谱一页」的分享卡索引（id -> [曲名, 歌手, 音符数]）: 边缘 Worker 取它来给
 // `/s/<id>` 注入 `<title>`/og:*（爬虫不跑 JS，没有它 1.1 万个谱页在爬虫眼里是同一份 HTML）。
-const DATA_FILES = ['songs.jsonl.gz', 'stats.json', 'og.json'];
+// Cloudflare Workers 静态资源**单文件上限 25 MiB**: 语料过 5.6 万首后整份 songs.jsonl.gz
+// 是 26.6 MB, 部署会被拒。所以 build_web_data.py 会切成 songs.partNN.jsonl.gz + index.json,
+// 这里按目录实际内容决定带哪一套(有分片就不带整份, 免得白传 26 MB 还超限)。
+const DATA_DIR = join(ROOT, 'data');
+const PART_FILES = existsSync(DATA_DIR)
+  ? readdirSync(DATA_DIR).filter((f) => /^songs\.part\d+\.jsonl\.gz$/.test(f)).sort()
+  : [];
+const USE_PARTS = PART_FILES.length > 1 && existsSync(join(DATA_DIR, 'index.json'));
+const DATA_FILES = USE_PARTS
+  ? ['index.json', ...PART_FILES, 'stats.json', 'og.json']
+  : ['songs.jsonl.gz', 'stats.json', 'og.json'];
 
 rmSync(DIST, { recursive: true, force: true });
 let n = 0, bytes = 0;

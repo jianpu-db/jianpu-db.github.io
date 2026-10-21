@@ -129,6 +129,50 @@
       "kind": "readonly",
       "note": "置信度最低那 10% 的分位值 —— 平均看着还行、个别音很虚时靠它发现"
     },
+    "album": {
+      "label": {
+        "zh": "专辑",
+        "en": "Album"
+      },
+      "attr": "album",
+      "kind": "list",
+      "editable": true,
+      "hint": "所属专辑（多个用逗号）",
+      "note": "来自原谱页面的歌曲信息; 没有就空着, 不造"
+    },
+    "lyricist": {
+      "label": {
+        "zh": "作词",
+        "en": "Lyricist"
+      },
+      "attr": "lyricist",
+      "kind": "list",
+      "editable": true,
+      "hint": "作词人（多个用逗号）",
+      "note": "来自原谱页面的歌曲信息"
+    },
+    "composer": {
+      "label": {
+        "zh": "作曲",
+        "en": "Composer"
+      },
+      "attr": "composer",
+      "kind": "list",
+      "editable": true,
+      "hint": "作曲人（多个用逗号）",
+      "note": "来自原谱页面的歌曲信息"
+    },
+    "arranger": {
+      "label": {
+        "zh": "编曲",
+        "en": "Arranger"
+      },
+      "attr": "arranger",
+      "kind": "list",
+      "editable": true,
+      "hint": "编曲人（多个用逗号）",
+      "note": "来自原谱页面的歌曲信息"
+    },
     "tags": {
       "label": {
         "zh": "标签",
@@ -184,15 +228,16 @@
       "note": "必须人工核对过的**确切页面**; 原谱站那一页能推出时由 source_pages.json 自动带"
     }
   },
-  "songs": 56829,
-  "notes": 11649861,
-  "groups": 39287,
+  "songs": 58208,
+  "notes": 12178622,
+  "groups": 40569,
   "sources": {
     "fysongs": 36389,
     "qupu123": 6049,
     "jp114": 4924,
     "jianpujia": 4543,
     "jianpucn": 4375,
+    "je": 1379,
     "abcgh": 492,
     "": 46,
     "unknown": 6,
@@ -200,11 +245,11 @@
     "qpcxw": 2,
     "qinyipu": 1
   },
-  "bytes_gz": 26589939,
-  "with_accidental": 206,
-  "with_raw": 56829,
-  "with_images": 6307,
-  "image_pages": 8138,
-  "image_sources": 60203,
+  "bytes_gz": 27465531,
+  "with_accidental": 1286,
+  "with_raw": 58208,
+  "with_images": 0,
+  "image_pages": 0,
+  "image_sources": 0,
   "img_base": "/img/"
 }

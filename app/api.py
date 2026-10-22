@@ -415,7 +415,10 @@ _RATE_LIMITED = {
 _ERR_EXAMPLE = {
     "application/json": {"example": {"error": "缺 query（要查的旋律数字串，如 query=316316）"}}
 }
-_COMMON_RESPONSES = {
+# 键类型必须是 `int | str`, 不能只写 `int`: mypy 2.x 检查 `responses={**_COMMON_RESPONSES, 200: {...}}`
+# 时要求被解包项满足 `SupportsKeysAndGetItem[int | str, ...]`, 而 `dict[int, ...].__getitem__` 只收 int
+# (参数逆变), 于是报 `[dict-item]`。运行时没区别 —— FastAPI 的 responses 键本来就都用整数。
+_COMMON_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: dict(_ERR, description="参数不对（缺 query / query 太长 / 认不出音高数字 / `fmt` 不是 json）",
               content=_ERR_EXAMPLE),
     404: dict(_ERR, description="没有这个实体或端点", content=_ERR_EXAMPLE),

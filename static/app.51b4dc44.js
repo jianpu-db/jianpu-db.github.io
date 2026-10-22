@@ -20,18 +20,34 @@ function $(id) {
   return document.getElementById(id);
 }
 var IDX = null;
+function gunzipText(p) {
+  return p.then(function(r) {
+    if (r.headers && r.headers.get && /gzip/i.test(r.headers.get("content-encoding") || "")) return r.text();
+    var body = typeof r.clone === "function" ? r.clone().body : r.body;
+    return new Response(body.pipeThrough(new DecompressionStream("gzip"))).text().catch(function() {
+      return typeof r.text === "function" ? r.text() : "";
+    });
+  });
+}
 function loadCorpus() {
   if (typeof DecompressionStream === "undefined") {
     return fetch(appUrl("data/songs.jsonl")).then(function(r) {
       return r.text();
     });
   }
-  return fetch(appUrl("data/songs.jsonl.gz")).then(function(r) {
-    if (r.headers && r.headers.get && /gzip/i.test(r.headers.get("content-encoding") || "")) return r.text();
-    var body = typeof r.clone === "function" ? r.clone().body : r.body;
-    return new Response(body.pipeThrough(new DecompressionStream("gzip"))).text().catch(function() {
-      return typeof r.text === "function" ? r.text() : "";
+  return fetch(appUrl("data/index.json")).then(function(r) {
+    return r && r.ok ? r.json() : null;
+  }).catch(function() {
+    return null;
+  }).then(function(idx) {
+    if (!idx || !idx.parts || !idx.parts.length) return null;
+    return Promise.all(idx.parts.map(function(p) {
+      return gunzipText(fetch(appUrl("data/" + p.file)));
+    })).then(function(texts) {
+      return texts.join("");
     });
+  }).then(function(txt) {
+    return txt === null || txt === void 0 ? gunzipText(fetch(appUrl("data/songs.jsonl.gz"))) : txt;
   });
 }
 function esc(s) {
@@ -98,6 +114,11 @@ var FIELDS = {
   file: { label: { zh: "文件", en: "File" }, kind: "readonly" },
   group: { label: { zh: "曲名", en: "Title" }, kind: "readonly" },
   artist: { label: { zh: "歌手", en: "Artist" }, kind: "list", editable: true, hint: "邓丽君（多个用逗号）" },
+  // 歌曲信息的制作名单(2026-10-20 用户口径): 与歌手并列的元数据行, 不是注释
+  album: { label: { zh: "专辑", en: "Album" }, kind: "list", editable: true, hint: "所属专辑" },
+  lyricist: { label: { zh: "作词", en: "Lyricist" }, kind: "list", editable: true, hint: "作词人" },
+  composer: { label: { zh: "作曲", en: "Composer" }, kind: "list", editable: true, hint: "作曲人" },
+  arranger: { label: { zh: "编曲", en: "Arranger" }, kind: "list", editable: true, hint: "编曲人" },
   status: { label: { zh: "状态", en: "Status" }, kind: "readonly" },
   n: { label: { zh: "音符", en: "Notes" }, kind: "readonly" },
   bars: { label: { zh: "小节", en: "Bars" }, kind: "readonly" },
@@ -296,6 +317,18 @@ var FIELD_VALUE = {
   artist: function(r, h) {
     return r.artist && r.artist.length ? h.esc(h.list(r.artist)) : "—";
   },
+  album: function(r, h) {
+    return r.album && r.album.length ? h.esc(h.list(r.album)) : "—";
+  },
+  lyricist: function(r, h) {
+    return r.lyricist && r.lyricist.length ? h.esc(h.list(r.lyricist)) : "—";
+  },
+  composer: function(r, h) {
+    return r.composer && r.composer.length ? h.esc(h.list(r.composer)) : "—";
+  },
+  arranger: function(r, h) {
+    return r.arranger && r.arranger.length ? h.esc(h.list(r.arranger)) : "—";
+  },
   status: function(r, h) {
     return h.esc(r.status || "?") + (r.status === "ok" ? "（人工校对过）" : r.status === "ocr" ? "（图片机器转写）" : "");
   },
@@ -357,6 +390,7 @@ function metaRows(r) {
     var render2 = FIELD_VALUE[key];
     var val = render2 ? render2(r, h) : "—";
     var name = fieldLabel(f);
+    if (key === "transcriber" && /^je-/.test(r.source || "")) name = LANG === "en" ? "Notator" : "记谱";
     var note = f.note ? ' title="' + esc(f.note) + '"' : "";
     rows.push(["<span" + note + ">" + esc(name) + "</span>", val + attrPlus(r, key)]);
   });

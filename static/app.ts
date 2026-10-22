@@ -508,6 +508,9 @@ function metaRows(r) {
     var render = FIELD_VALUE[key];
     var val = render ? render(r, h) : '—';
     var name = fieldLabel(f);
+    // 用户口径(2026-10-22): 「记谱」与「转写」不是一回事 —— 记谱是听出来的(声音→谱), 转写是换记法(符号→符号)。
+    // je 的谱是原帖作者听着歌写下的, 所以这一栏对他们按"记谱"显示; 其余(图片 OCR / 别的记号翻过来的)仍是"转写"。
+    if (key === 'transcriber' && /^je-/.test(r.source || '')) name = LANG === 'en' ? 'Notator' : '记谱';
     // 显示名那一列挂 title: 能改的说明怎么改, 不能改的说明为什么不能改(都来自 schema 的 note)
     var note = f.note ? ' title="' + esc(f.note) + '"' : '';
     rows.push(['<span' + note + '>' + esc(name) + '</span>', val + attrPlus(r, key)]);

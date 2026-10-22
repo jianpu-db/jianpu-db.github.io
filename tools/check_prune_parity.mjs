@@ -12,11 +12,12 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const N = Number(process.argv[2] || 60);
 const { buildIndex, search, ensureGrams } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
-const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
+const idx = buildIndex(corpusText());
 const songs = idx.songs;
 
 // 先算一遍"全扫"的结果（此时 grams 还没建）

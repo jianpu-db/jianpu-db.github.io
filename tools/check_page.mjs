@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
 import { waitFor } from './_wait.mjs';
+import { corpusParts, corpusGzBuffer, corpusText } from './corpus.mjs';
 // ⚠ 2026-10-01 修（CI 上 `web · node 22` 的"高亮 + 收录页"红）:
 //   这个脚本原来把 **argv[2] 当查询串**，而同一批的其它检查（check_ui/check_tune/check_live）
 //   argv[2] 是**服务 URL**。于是 CI 里按家族约定传了 URL -> 脚本拿
@@ -36,8 +37,26 @@ global.window = global;
 global.location = { protocol: 'http:', host: '127.0.0.1:8770' };
 global.performance = { now: () => Date.now() };
 global.fetch = async (u) => {
+  // 语料: 线上走**分片**(data/index.json + data/songs.partNN.jsonl.gz) —— 整份 gz 不再入库,
+  // 干净检出里没有它。两种来源都模拟, 让自检跑的是浏览器真的会走的那条路。
+  if (u.endsWith('data/index.json')) {
+    const parts = corpusParts();
+    return {
+      ok: true,
+      json: async () => ({
+        v: 1, format: 'songs-jsonl-gz-parts', songs: 0,
+        parts: parts.map((x) => ({ file: x.file.replace(/^data\//, ''), songs: 0, bytes: x.buf.length })),
+      }),
+    };
+  }
+  if (/songs\.part\d+\.jsonl\.gz$/.test(u)) {
+    const name = u.split('/').pop();
+    const part = corpusParts().find((x) => x.file.endsWith('/' + name));
+    if (!part) return { ok: false, status: 404, json: async () => ({}) };
+    return { ok: true, body: new Response(part.buf).body, json: async () => ({}) };
+  }
   if (u.endsWith('songs.jsonl.gz')) {
-    const buf = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
+    const buf = corpusGzBuffer();
     return { ok: true, body: new Response(buf).body, json: async () => ({}) };
   }
   if (u.endsWith('stats.json')) {
@@ -79,7 +98,7 @@ console.log('status 文本:', (mkEl('status').textContent || '(空)').slice(0, 8
 const { buildIndex, search } = await importStatic('search');
 const { parseQuery, parseTokenAll, isPitch } = await importStatic('jptok');
 const app = await importStatic('app');
-const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
+const idx = buildIndex(corpusText());
 const q = parseQuery(QUERY);
 const res = search(idx, [q], { top: 2 });
 console.log('查询:', QUERY, '-> 检索结果数:', res.length);

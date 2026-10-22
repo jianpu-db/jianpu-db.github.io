@@ -14,8 +14,9 @@ import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
 import { sleep, waitFor } from './_wait.mjs';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
-const songsBuf = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
+const songsBuf = corpusGzBuffer();
 const rows = gunzipSync(songsBuf).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
 // 样本: 一首**多节/带 KeepLength**的(最能证明"拿的是文件原文而不是展开版"), 一首没有原站页面的

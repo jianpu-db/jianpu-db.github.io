@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const { buildIndex, search, ensureGrams } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
@@ -35,7 +36,7 @@ const GOLDEN = [
   { q: '55443256222', L: 11, group: '黄河牵着我的手', cost: 0, tied: 1 },
 ];
 
-const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
+const idx = buildIndex(corpusText());
 ensureGrams(idx, 4);          // 门槛要覆盖**剪枝路径**（线上会建，这里也建）
 
 let fail = 0;

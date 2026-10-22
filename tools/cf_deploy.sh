@@ -44,17 +44,29 @@ fi
 echo
 echo "== 从公网验证 $URL =="
 sleep 3
-for p in "/" "/api/health" "/data/songs.jsonl.gz" "/s/qupu123-313063"; do
+for p in "/" "/api/health" "/data/index.json" "/s/qupu123-313063"; do
   c=$(curl -s -m 30 -o /tmp/_cd.out -w '%{http_code}' "$URL$p")
   ok "$([ "$c" = 200 ] && echo 1 || echo 0)" "$p -> $c"
 done
 echo "  /api/health: $(curl -s -m 20 "$URL/api/health")"
 IMG=$(python3 - <<'PY'
-import gzip, json, urllib.parse
+import gzip, io, json, os, urllib.parse
+# 语料在仓库里是分片(index.json + songs.partNN.jsonl.gz), 老本机可能有整份 —— 两种都认。
+def songs():
+    if os.path.exists('data/songs.jsonl.gz'):
+        with gzip.open('data/songs.jsonl.gz', 'rt', encoding='utf-8') as f:
+            for ln in f:
+                yield ln
+        return
+    idx = json.load(io.open('data/index.json', encoding='utf-8'))
+    for p in idx['parts']:
+        with gzip.open(os.path.join('data', p['file']), 'rt', encoding='utf-8') as f:
+            for ln in f:
+                yield ln
 imgs = {}
 for ln in gzip.open('data/images.jsonl.gz', 'rt', encoding='utf-8'):
     r = json.loads(ln); imgs[r['s']] = r
-for ln in gzip.open('data/songs.jsonl.gz', 'rt', encoding='utf-8'):
+for ln in songs():
     r = json.loads(ln)
     if r.get('s') in imgs and imgs[r['s']]['pg']:
         print(urllib.parse.quote(imgs[r['s']]['d'] + '/' + imgs[r['s']]['pg'][0][0])); break

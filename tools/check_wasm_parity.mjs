@@ -16,6 +16,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const WASM = process.argv[2]
   || 'D:/Documents_D/jianpu2/wasm-matcher/target/wasm32-unknown-unknown/release/jianpu_matcher.wasm';
@@ -31,7 +32,7 @@ if (!existsSync(WASM)) {
 const { buildIndex, bestWindow, search } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
 
-const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
+const idx = buildIndex(corpusText());
 console.log(`语料 ${idx.count} 首（站点索引口径）`);
 
 // ── 把语料摊成 wasm 要的三块数组 ──────────────────────────────────────────────

@@ -86,7 +86,8 @@ jobs:
           test -f dist/.nojekyll
           test ! -e dist/_headers
           cmp -s dist/404.html dist/index.html
-          test -s dist/data/songs.jsonl.gz
+          test -s dist/data/index.json
+          ls dist/data/songs.part*.jsonl.gz >/dev/null
           grep -q 'window.JIANPU_READONLY=true;' dist/index.html
           entry=$(grep -o 'static/app\.[0-9a-f]*\.js' dist/index.html | head -1)
           echo "entry=$entry" >> "$GITHUB_OUTPUT"

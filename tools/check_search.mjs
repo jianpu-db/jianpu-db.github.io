@@ -4,8 +4,9 @@ import { importStatic } from './_built.mjs';
 const { buildIndex, search } = await importStatic('search');
 const { parseQuery, show } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
-const gz = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
+const gz = corpusGzBuffer();
 const t0 = Date.now();
 const idx = buildIndex(gunzipSync(gz).toString('utf8'));
 console.log(`索引 ${idx.count} 首 / ${idx.groupCount} 组，${Date.now() - t0} ms\n`);
@@ -61,7 +62,10 @@ const CASES = [
   ['55532235 3211612655', '上春山', '两段'],
   ['5 5 5 3 2 2 3 5 3 2 1 1 6 1 2 6 5 5', '上春山', '空格不分段'],
   ['66165535 532322 7656', '鲁冰花', '三段'],
-  ['5111156711', '义勇军进行曲', '单段'],
+  // 2026-10-22: 语料涨到 58,208 后, 国歌这段旋律在库里**三个标题都是 0 代价**
+  //   (《中华人民共和国》101 音 / 《中华人民共和国国歌》217 音 / 《义勇军进行曲》108 音),
+  //   并列裁决按"歌短优先"选到了 101 音那首 —— 是**同旋律不同标题**, 不是回归, 所以期望值写成一组。
+  ['5111156711', ['义勇军进行曲', '中华人民共和国', '中华人民共和国国歌'], '单段（国歌三个标题同旋律并列 0 代价）'],
 ];
 let pass = 0;
 for (const [q, want, note] of CASES) {
@@ -69,7 +73,8 @@ for (const [q, want, note] of CASES) {
   const t = Date.now();
   const res = search(idx, segs, { top: 3 });
   const top = res[0];
-  const ok = top && (top.group === want || top.title === want);
+  const wantList = Array.isArray(want) ? want : [want];
+  const ok = top && wantList.some((w) => top.group === w || top.title === w);
   if (ok) pass++;
   console.log(`${ok ? '✓' : '✗'} ${q.padEnd(38)} -> ${top ? `${top.group} (代价 ${top.cost})` : '无'}  ${Date.now() - t} ms  [${note}]`);
   if (top) console.log(`     库内该段 ${show(top.libNotes)}  |  输入 ${show(top.qNotes)}`);

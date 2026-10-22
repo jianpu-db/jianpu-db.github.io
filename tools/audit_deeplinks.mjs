@@ -8,11 +8,12 @@
 // 这是**审计**不是门槛（会打网络、11k 全量不现实），所以不进 CI。
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const N = Number(process.argv[2] || 60);
 const BASE = process.argv[3] || 'https://jianpu-db.org';
 
-const raw = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8');
+const raw = corpusText();
 const rows = raw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
 // 先取 sitemap（顺便验它本身）

@@ -7,8 +7,9 @@ import { importStatic } from './_built.mjs';
 const { buildIndex, search } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 const argv = process.argv.slice(2).filter((a) => !/^https?:\/\//.test(a));
-const SONGS_TXT = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8');
+const SONGS_TXT = corpusText();
 
 // 查询片段**从"自带 MBID 的歌"自己的音高串里取**, 而且当场验证"它确实排第一" ——
 // 为什么不能写死: 语料一涨, 同一个片段的头名就会换(2026-09-28 实测: 语料 8926 -> 9340 后,
@@ -45,7 +46,7 @@ global.location = { protocol: 'http:', host: '127.0.0.1:8770' };
 global.performance = { now: () => Date.now() };
 global.fetch = async (u) => {
   if (String(u).endsWith('songs.jsonl.gz')) {
-    const buf = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
+    const buf = corpusGzBuffer();
     return { ok: true, body: new Response(buf).body, json: async () => ({}) };
   }
   if (String(u).endsWith('stats.json')) {

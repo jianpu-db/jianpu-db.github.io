@@ -15,6 +15,7 @@ import { importStatic } from './_built.mjs';
 const { buildIndex, search } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const dump = process.argv[2];
 const limit = process.argv.includes('--limit') ? Number(process.argv[process.argv.indexOf('--limit') + 1]) : 0;
@@ -22,7 +23,7 @@ if (!dump) {
   console.error('用法: node tools/check_js_parity.mjs <dump.tsv> [--limit N]');
   process.exit(2);
 }
-const gz = readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url));
+const gz = corpusGzBuffer();
 const t0 = Date.now();
 const idx = buildIndex(gunzipSync(gz).toString('utf8'));
 console.log(`索引 ${idx.count} 首 / ${idx.groupCount} 组（${Date.now() - t0} ms）`);

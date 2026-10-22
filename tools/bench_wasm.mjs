@@ -14,6 +14,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { importStatic } from './_built.mjs';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const N = Number(process.argv[2] || 30);
 const WASM = process.argv[3]
@@ -26,7 +27,7 @@ if (!existsSync(WASM)) {
 
 const { buildIndex, search } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
-const idx = buildIndex(gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url))).toString('utf8'));
+const idx = buildIndex(corpusText());
 
 // ── 语料数组（与线上同一份索引）──────────────────────────────────────────────
 const songs = idx.songs;

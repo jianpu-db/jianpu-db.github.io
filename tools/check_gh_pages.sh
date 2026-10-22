@@ -24,7 +24,7 @@ echo "=== 产物断言（GH Pages 规矩） ==="
 [ ! -e dist-gh/_headers ]; ck $? "不带 Cloudflare 的 _headers"
 cmp -s dist-gh/404.html dist-gh/index.html; ck $? "404.html 与 index.html 逐字节相同"
 grep -q 'window.JIANPU_READONLY=true;' dist-gh/index.html; ck $? "默认只读：注入了 JIANPU_READONLY"
-[ -s dist-gh/data/songs.jsonl.gz ] && [ -s dist-gh/data/stats.json ]; ck $? "数据文件在（songs.jsonl.gz + stats.json）"
+[ -s dist-gh/data/index.json ] && [ -s dist-gh/data/stats.json ] && ls dist-gh/data/songs.part*.jsonl.gz >/dev/null 2>&1; ck $? "数据文件在（index.json + 分片 + stats.json）"
 # index.html 引用的静态资源必须真的存在(带内容哈希, 名字对不上就是白屏)
 # 只认 href/src 属性里的值 —— 别被注释里那句"相对路径会被解析成 /s/static/app.js"骗到。
 refs=$(grep -oE '(href|src)="\./static/[^"]+"' dist-gh/index.html | sed -E 's/^[a-z]+="\.\///; s/"$//' | sort -u)
@@ -33,10 +33,19 @@ for r in $refs; do nrefs=$((nrefs + 1)); [ -f "dist-gh/$r" ] || { echo "  缺失
 [ "$nrefs" -ge 2 ] && [ "$miss" = 0 ]; ck $? "index.html 引用的静态资源都在（$nrefs 个, 带内容哈希）"
 # 规范形式: 数据不能被算成"页面"(否则 404 回退会把 .gz 请求变成 HTML)
 python3 - <<'PY'
-import gzip, io, json, sys
-with gzip.open('dist-gh/data/songs.jsonl.gz', 'rt', encoding='utf-8') as f:
-    n = sum(1 for ln in f if ln.strip())
-st = json.load(io.open('dist-gh/data/stats.json', encoding='utf-8'))
+import gzip, io, json, os, sys
+# 语料在仓库里是**分片**(index.json + songs.partNN.jsonl.gz); 老产出可能有整份, 两种都认。
+d = 'dist-gh/data'
+n = 0
+if os.path.exists(os.path.join(d, 'songs.jsonl.gz')):
+    with gzip.open(os.path.join(d, 'songs.jsonl.gz'), 'rt', encoding='utf-8') as f:
+        n = sum(1 for ln in f if ln.strip())
+else:
+    idx = json.load(io.open(os.path.join(d, 'index.json'), encoding='utf-8'))
+    for p in idx['parts']:
+        with gzip.open(os.path.join(d, p['file']), 'rt', encoding='utf-8') as f:
+            n += sum(1 for ln in f if ln.strip())
+st = json.load(io.open(os.path.join(d, 'stats.json'), encoding='utf-8'))
 print("  语料 %d 首（stats 说 %s 首）" % (n, st.get('songs')))
 sys.exit(0 if n == st.get('songs') and n > 7000 else 1)
 PY

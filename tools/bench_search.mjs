@@ -11,6 +11,7 @@ import { importStatic } from './_built.mjs';
 const { buildIndex, search, ensureGrams } = await importStatic('search');
 const { parseQuery } = await importStatic('jptok');
 import { gunzipSync } from 'node:zlib';
+import { corpusText, corpusGzBuffer } from './corpus.mjs';
 
 const N = Number(process.argv[2] || 20);
 const QUERIES = [
@@ -27,7 +28,7 @@ function median(xs) {
 }
 
 const t0 = performance.now();
-const raw = gunzipSync(readFileSync(new URL('../data/songs.jsonl.gz', import.meta.url)));
+const raw = gunzipSync(corpusGzBuffer());
 const t1 = performance.now();
 const idx = buildIndex(raw.toString('utf8'));
 const t2 = performance.now();
